@@ -452,7 +452,8 @@ module.exports = async function handleButton(interaction) {
         if (trade.status !== 'open' && trade.status !== 'mm_requested') {
         return interaction.reply({ content: `❌ Ce trade n'est pas ouvert (status=${trade.status}).`, ephemeral: true });
       }
-      trade.status = 'accepted';
+      const hasProof = trade.paymentProof && trade.paymentProof.length > 0;
+      trade.status = hasProof ? 'accepted' : 'awaiting_proof';
       trade.acceptedBy = interaction.user.id;
       trade.acceptedByTag = interaction.user.tag;
       trade.acceptedAt = new Date().toISOString();

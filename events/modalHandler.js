@@ -44,6 +44,9 @@ module.exports = async function handleModal(interaction) {
         const from = interaction.user;
         trade.paymentProof = trade.paymentProof || [];
         trade.paymentProof.push({ fromId: from.id, fromTag: from.tag, proof, at: new Date().toISOString() });
+        if (trade.status === 'awaiting_proof') {
+          trade.status = 'accepted';
+        }
         writeData('trades.json', trades);
 
         // notify author and other party if available

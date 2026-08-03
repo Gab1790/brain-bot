@@ -1,5 +1,20 @@
 const { EmbedBuilder } = require('discord.js');
 
+function getTradeStatusLabel(status) {
+  const labels = {
+    open: 'Ouvert',
+    accepted: 'Accepté',
+    awaiting_proof: 'En attente de preuve',
+    awaiting_mm: 'En attente de middleman',
+    mm_requested: 'Middleman demandé',
+    escrow_locked: 'Escrow verrouillé',
+    cancelled: 'Annulé',
+    completed: 'Terminé',
+    expired: 'Expiré'
+  };
+  return labels[status] || status || 'open';
+}
+
 function buildEmbedFromTrade(trade) {
   const embed = new EmbedBuilder()
     .setTitle('🔖 Offre P2P')
@@ -9,7 +24,7 @@ function buildEmbedFromTrade(trade) {
       { name: '🎯 Demande', value: (trade.demand || []).join(', ') || '—', inline: true },
       { name: '💳 Paiement', value: trade.payment || '—', inline: true },
       { name: '💰 Totaux', value: `Offre: **${(trade.offerTotal||0).toLocaleString('fr-FR')}** | Demande: **${(trade.demandTotal||0).toLocaleString('fr-FR')}**`, inline: false },
-      { name: '📈 Statut', value: `${trade.status || 'open'}`, inline: true }
+      { name: '📈 Statut', value: getTradeStatusLabel(trade.status), inline: true }
     )
     .setTimestamp(new Date(trade.createdAt || Date.now()));
 
@@ -48,6 +63,8 @@ function buildEmbedFromTrade(trade) {
 
     if (trade.status === 'accepted' && trade.acceptedByTag) {
     embed.setFooter({ text: `Accepté par ${trade.acceptedByTag}` });
+  } else if (trade.status === 'awaiting_proof') {
+    embed.setFooter({ text: 'En attente de preuve' });
   } else if (trade.status === 'cancelled' && trade.cancelledBy) {
     embed.setFooter({ text: `Annulé` });
   } else if (trade.status === 'mm_requested' || trade.status === 'awaiting_mm') {
@@ -59,4 +76,4 @@ function buildEmbedFromTrade(trade) {
   return embed;
 }
 
-module.exports = { buildEmbedFromTrade };
+module.exports = { buildEmbedFromTrade, getTradeStatusLabel };
