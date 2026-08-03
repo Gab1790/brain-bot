@@ -32,7 +32,8 @@ module.exports = {
     }
 
     const values = await getSheetValues(guildId);
-    // normalization: try exact match, then includes, then fallback to original
+    // normalization: try exact match, then startsWith/includes, then fuzzy best match, then fallback to original
+    const { bestMatch } = require('../utils/fuzzy');
     const normalize = (name) => {
       const n = name.toLowerCase().trim();
       if (values[n]) return n;
@@ -41,6 +42,8 @@ module.exports = {
       if (byStart) return byStart;
       const byInclude = keys.find(k => k.includes(n));
       if (byInclude) return byInclude;
+      const fuzzy = bestMatch(n, keys, 3);
+      if (fuzzy) return fuzzy;
       return n; // unknown, keep as-is
     };
 
@@ -98,14 +101,23 @@ module.exports = {
       )
       .setTimestamp();
 
-    const row = new ActionRowBuilder().addComponents(
+    const primaryRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`accept_${id}`).setLabel('Accepter').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`message_${id}`).setLabel('Envoyer un message').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`cancel_${id}`).setLabel('Annuler').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(`requestmm_${id}`).setLabel('Demander Middleman').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId(`requestmm_${id}`).setLabel('Demander Middleman').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`proof_${id}`).setLabel('Ajouter preuve (paiement)').setStyle(ButtonStyle.Secondary)
     );
 
-    await interaction.editReply({ embeds: [embed], components: [row] });
+    const secondaryRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`escrow_lock_${id}`).setLabel('Verrouiller en escrow').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`escrow_cancel_${id}`).setLabel('Annuler escrow').setStyle(ButtonStyle.Danger),
+      // Middleman quick-confirm button (visible to all but only usable by MM/mods)
+      new ButtonBuilder().setCustomId(`mm_confirm_${id}`).setLabel('Confirmer (MM)').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`escrow_release_${id}`).setLabel('Relâcher (MM)').setStyle(ButtonStyle.Success)
+    );
+
+    await interaction.editReply({ embeds: [embed], components: [primaryRow, secondaryRow] });
     // store announcement message id/channel for later updates
     try {
       const posted = await interaction.fetchReply();
@@ -120,7 +132,7 @@ module.exports = {
     if (cfg.notifyChannelId) {
       try {
         const ch = await interaction.guild.channels.fetch(cfg.notifyChannelId);
-        if (ch) ch.send({ embeds: [embed], components: [row] }).catch(() => {});
+        if (ch) ch.send({ embeds: [embed], components: [primaryRow, secondaryRow] }).catch(() => {});
       } catch {}
     }
   }

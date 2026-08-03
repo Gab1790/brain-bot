@@ -1,10 +1,9 @@
 /**
  * Provides local P2P values and a global average used for P2P trades.
  *
- * REPLACES previous Google Sheets dependency:
- * - Values are now stored locally in data/values.json (managed via /addvalue).
- * - A per-guild global average can be stored in guild config as `globalAverage`.
- *   If not present, an average of values.json entries will be computed as fallback.
+ * Values are stored locally in data/values.json (managed via /addvalue).
+ * A per-guild global average can be stored in guild config as `globalAverage`.
+ * If not present, an average of values.json entries will be computed as fallback.
  *
  * Cache is kept to avoid repeated disk reads.
  */

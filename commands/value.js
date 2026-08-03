@@ -73,13 +73,13 @@ module.exports = {
 
     // If we found nothing at all
     if (!tradeItem && !stats) {
-      const hasSheet = !!getGuildConfig(guildId).sheetUrl;
+      const hasLocalValues = sheetVals.status === 'fulfilled' && Object.keys(sheetVals.value || {}).length > 0;
       return interaction.editReply({
         content:
           `❌ Aucune donnée trouvée pour **${itemName}**.\n` +
-          (!hasSheet
-            ? '💡 Aucun Google Sheet configuré. Un admin peut utiliser `/setup sheet_url` pour en ajouter un.\n'
-            : '💡 Vérifie l\'orthographe ou demande au staff de mettre à jour le sheet.\n') +
+          (!hasLocalValues
+            ? '💡 Aucune valeur locale trouvée. Un admin peut utiliser `/addvalue` ou `/setup set_global_average` pour ajouter des références.\n'
+            : '💡 Vérifie l\'orthographe ou demande au staff de mettre à jour la base locale.\n') +
           '💡 Ou consulte directement le wiki : ' +
           `https://stealabrainrot.fandom.com/wiki/${encodeURIComponent(itemName)}`,
       });
@@ -93,7 +93,7 @@ module.exports = {
       .setTitle(`🧠 ${displayName}`)
       .setColor(embedColor)
       .setTimestamp()
-      .setFooter({ text: 'Sources : Google Sheet staff (trade) + Wiki Fandom (stats)' });
+      .setFooter({ text: 'Sources : base locale (trade) + Wiki Fandom (stats)' });
 
     // ── Trade value (local values) ──────────────────────────────────────
     const globalAvg = getGlobalAverage(guildId);

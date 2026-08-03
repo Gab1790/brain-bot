@@ -12,7 +12,7 @@ module.exports = {
         { name: '💰 Trade', value:
           '`/value [item]` — Voir la valeur (trade + stats Fandom)\n' +
           '`/tradecalc` — Comparer deux offres\n' +
-          '_Les valeurs de trade sont maintenues par le staff dans Google Sheets_'
+          '_Les valeurs de trade sont maintenues localement via les commandes du bot (ex: /addvalue) ou la moyenne globale configurée_' 
         },
         { name: '🛡️ Sécurité', value:
           '`/mm` — Demander un middleman\n' +
@@ -27,7 +27,7 @@ module.exports = {
           '`/setup middleman_role` — Définir le rôle Middleman\n' +
           '`/setup ticket_category` — Catégorie de tickets\n' +
           '`/setup log_channel` — Salon de logs\n' +
-          '`/setup sheet_url` — 📊 Lier le Google Sheet de trade\n' +
+          '' +
           '`/setup reset` — Réinitialiser la config'
         }
       )

@@ -32,15 +32,6 @@ module.exports = {
         .addChannelOption(opt => opt.setName('salon').setDescription('Salon de logs').setRequired(true))
     )
     .addSubcommand(sub =>
-      sub.setName('sheet_url')
-        .setDescription('Configure le lien Google Sheets CSV pour les valeurs de trade (staff)')
-        .addStringOption(opt =>
-          opt.setName('url')
-            .setDescription('URL CSV publié (Fichier → Partager → Publier sur le web → CSV)')
-            .setRequired(true)
-        )
-    )
-    .addSubcommand(sub =>
           sub.setName('notify_channel')
             .setDescription('Définit le salon où poster automatiquement les nouvelles offres')
             .addChannelOption(opt => opt.setName('salon').setDescription('Salon de notifications').setRequired(true))
@@ -65,7 +56,7 @@ module.exports = {
       const mmRole      = config.middlemanRoleId ? `<@&${config.middlemanRoleId}>` : '❌ Non configuré';
       const ticketCat   = config.ticketCategoryId ? `<#${config.ticketCategoryId}>` : '❌ Non configuré (racine)';
       const logChannel  = config.logChannelId   ? `<#${config.logChannelId}>` : '❌ Non configuré';
-      const sheetStatus = config.sheetUrl ? '✅ Configuré' : '❌ Non configuré';
+      const globalAvg   = config.globalAverage != null ? `${config.globalAverage}` : '❌ Non défini';
 
       const embed = new EmbedBuilder()
         .setTitle('⚙️ Configuration du serveur')
@@ -74,7 +65,7 @@ module.exports = {
           { name: '🤝 Rôle Middleman',   value: mmRole,       inline: true },
           { name: '📁 Catégorie tickets',value: ticketCat,    inline: true },
           { name: '📋 Salon de logs',    value: logChannel,   inline: true },
-          { name: '📊 Google Sheet',     value: sheetStatus,  inline: true }
+          { name: '📈 Moyenne globale',  value: globalAvg,    inline: true }
         )
         .setColor(0x9b59b6)
         .setFooter({ text: 'Utilisez /setup <option> pour modifier la configuration.' });
@@ -112,25 +103,6 @@ module.exports = {
       return interaction.reply({ content: `✅ Salon de notifications défini : ${channel}`, ephemeral: true });
     }
 
-    if (sub === 'sheet_url') {
-      const url = interaction.options.getString('url').trim();
-      if (!url.startsWith('https://docs.google.com/spreadsheets/')) {
-        return interaction.reply({
-          content:
-            '❌ URL invalide. Elle doit commencer par `https://docs.google.com/spreadsheets/`\n' +
-            '💡 Va dans ton Google Sheet → Fichier → Partager → Publier sur le web → Sélectionne ta feuille → CSV → Publie.',
-          ephemeral: true,
-        });
-      }
-      setGuildConfig(guildId, { sheetUrl: url });
-      invalidateCache(guildId);
-      return interaction.reply({
-        content:
-          '✅ Google Sheet configuré ! Les valeurs de trade seront rechargées automatiquement toutes les 5 minutes.\n' +
-          '📊 Format attendu du sheet : `name | value | trend | updatedAt`',
-        ephemeral: true,
-      });
-    }
 
     if (sub === 'set_global_average') {
       const value = interaction.options.getInteger('value');

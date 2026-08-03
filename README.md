@@ -51,7 +51,16 @@ npm run deploy   # à faire une fois (et à chaque ajout/modif de commande)
 npm start        # lance le bot
 ```
 
-## 4. Hébergement 24/7
+## 4. Vérifications et migration de stockage
+
+```bash
+npm test
+node scripts/migrate_json_to_sqlite.js
+```
+
+Le stockage des données est désormais SQLite-backed via [utils/db.js](utils/db.js) et migre automatiquement les anciens JSON si présents. Les scripts de migration peuvent aussi être exécutés manuellement pour convertir [data/](data/) vers la base locale.
+
+## 5. Hébergement 24/7
 
 ### Option A — VPS (recommandé, ~5€/mois : Hetzner, Contabo)
 ```bash
