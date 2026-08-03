@@ -41,9 +41,19 @@ module.exports = {
         )
     )
     .addSubcommand(sub =>
-      sub.setName('reset')
-        .setDescription('Réinitialise toute la configuration de ce serveur')
-    ),
+          sub.setName('notify_channel')
+            .setDescription('Définit le salon où poster automatiquement les nouvelles offres')
+            .addChannelOption(opt => opt.setName('salon').setDescription('Salon de notifications').setRequired(true))
+        )
+        .addSubcommand(sub =>
+          sub.setName('set_global_average')
+            .setDescription('Définit la moyenne P2P globale manuellement')
+            .addIntegerOption(opt => opt.setName('value').setDescription('Valeur numérique').setRequired(true))
+        )
+        .addSubcommand(sub =>
+          sub.setName('reset')
+            .setDescription('Réinitialise toute la configuration de ce serveur')
+        ),
 
   async execute(interaction) {
     const guildId = interaction.guildId;
@@ -96,6 +106,12 @@ module.exports = {
       return interaction.reply({ content: `✅ Salon de logs défini : ${channel}`, ephemeral: true });
     }
 
+    if (sub === 'notify_channel') {
+      const channel = interaction.options.getChannel('salon');
+      setGuildConfig(guildId, { notifyChannelId: channel.id });
+      return interaction.reply({ content: `✅ Salon de notifications défini : ${channel}`, ephemeral: true });
+    }
+
     if (sub === 'sheet_url') {
       const url = interaction.options.getString('url').trim();
       if (!url.startsWith('https://docs.google.com/spreadsheets/')) {
@@ -114,6 +130,12 @@ module.exports = {
           '📊 Format attendu du sheet : `name | value | trend | updatedAt`',
         ephemeral: true,
       });
+    }
+
+    if (sub === 'set_global_average') {
+      const value = interaction.options.getInteger('value');
+      setGuildConfig(guildId, { globalAverage: value });
+      return interaction.reply({ content: `✅ Moyenne P2P globale définie : ${value}`, ephemeral: true });
     }
 
     if (sub === 'reset') {

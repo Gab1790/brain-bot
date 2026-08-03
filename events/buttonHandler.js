@@ -75,4 +75,95 @@ module.exports = async function handleButton(interaction) {
   if (interaction.customId === 'close_ticket') {
     return closeTicketChannel(interaction);
   }
+
+  // Trade buttons: accept_<id>, message_<id>, cancel_<id>
+  // Also support requestmm and message modal ids
+  const idMatch = interaction.customId.match(/^(accept|message|cancel|requestmm)_(trade_\d+)$/);
+  if (idMatch) {
+    const action = idMatch[1];
+    const tradeId = idMatch[2];
+    const trades = require('../utils/db').readData('trades.json', {});
+    const trade = trades[tradeId];
+    if (!trade) {
+      return interaction.reply({ content: "❌ Offre introuvable.", ephemeral: true });
+    }
+
+    if (action === 'accept') {
+        if (trade.status !== 'open' && trade.status !== 'mm_requested') {
+        return interaction.reply({ content: `❌ Ce trade n'est pas ouvert (status=${trade.status}).`, ephemeral: true });
+      }
+      trade.status = 'accepted';
+      trade.acceptedBy = interaction.user.id;
+      trade.acceptedByTag = interaction.user.tag;
+      trade.acceptedAt = new Date().toISOString();
+      require('../utils/db').writeData('trades.json', trades);
+
+        // update embed message using reconstructed embed from trade
+      try {
+        const msg = interaction.message;
+          const updatedEmbed = require('../utils/tradeEmbed').buildEmbedFromTrade(trade);
+          await interaction.update({ embeds: [updatedEmbed], components: [] });
+        } catch (err) {
+          await interaction.reply({ content: `✅ Offre acceptée par ${interaction.user.tag}`, ephemeral: true });
+        }
+
+        return;
+      }
+
+      if (action === 'message') {
+        // Show modal to collect a message to send to the author
+        const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+        const modal = new ModalBuilder()
+          .setCustomId(`message_modal_${tradeId}`)
+          .setTitle(`Message pour ${trade.authorTag}`);
+
+        const input = new TextInputBuilder()
+          .setCustomId('message_text')
+          .setLabel('Ton message')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setPlaceholder('Écris ton message ici...');
+
+        const row = new ActionRowBuilder().addComponents(input);
+        modal.addComponents(row);
+
+        await interaction.showModal(modal);
+        return;
+      }
+
+      if (action === 'requestmm') {
+        // Create a middleman ticket and mark trade as mm_requested
+        const config = require('../utils/guildConfig').getGuildConfig(interaction.guild.id);
+        const mmRole = config.middlemanRoleId || config.staffRoleId || null;
+        trade.status = 'mm_requested';
+        trade.mmRequestedBy = interaction.user.id;
+        trade.mmRequestedAt = new Date().toISOString();
+        require('../utils/db').writeData('trades.json', trades);
+
+        // Create ticket channel and notify mm role
+        await createTicketChannel(interaction, 'mm');
+        try {
+          await interaction.reply({ content: '✅ Middleman demandé, le staff a été notifié.', ephemeral: true });
+        } catch {}
+        return;
+      }
+
+      if (action === 'cancel') {
+        if (interaction.user.id !== trade.authorId && !interaction.member.permissions.has(require('discord.js').PermissionFlagsBits.ManageMessages)) {
+          return interaction.reply({ content: '❌ Seul l\'auteur ou un modérateur peut annuler le trade.', ephemeral: true });
+      }
+        trade.status = 'cancelled';
+        trade.cancelledBy = interaction.user.id;
+        trade.cancelledAt = new Date().toISOString();
+        require('../utils/db').writeData('trades.json', trades);
+        try {
+          const msg = interaction.message;
+          const updatedEmbed = require('../utils/tradeEmbed').buildEmbedFromTrade(trade);
+          await interaction.update({ embeds: [updatedEmbed], components: [] });
+        } catch (err) {
+          await interaction.reply({ content: '✅ Offre annulée.', ephemeral: true });
+        }
+        return;
+      }
+  }
 };
