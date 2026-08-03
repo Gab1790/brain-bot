@@ -29,13 +29,27 @@ module.exports = {
     const value = interaction.options.getInteger('valeur');
     const trend = interaction.options.getString('tendance') || 'stable';
 
-    const values = readData('values.json', {});
-    values[itemName] = {
-      value,
-      trend,
-      updatedAt: new Date().toISOString().split('T')[0]
-    };
-    writeData('values.json', values);
+    const allValues = readData('values.json', {});
+    // keep backward compatibility: if structure is guild-scoped, store under guildId
+    const guildId = interaction.guildId;
+    if (allValues[guildId] && typeof allValues[guildId] === 'object') {
+      allValues[guildId][itemName] = { value, trend, updatedAt: new Date().toISOString().split('T')[0] };
+    } else if (allValues['_global'] && typeof allValues['_global'] === 'object') {
+      allValues['_global'][itemName] = { value, trend, updatedAt: new Date().toISOString().split('T')[0] };
+    } else {
+      // flat shape
+      allValues[itemName] = { value, trend, updatedAt: new Date().toISOString().split('T')[0] };
+    }
+    writeData('values.json', allValues);
+
+    // Append to history
+    const history = readData('values_history.json', []);
+    history.push({ guildId, item: itemName, value, trend, updatedAt: new Date().toISOString(), author: interaction.user.tag });
+    writeData('values_history.json', history);
+
+    // Invalidate cache
+    const { invalidateCache } = require('../utils/sheetValues');
+    invalidateCache(guildId);
 
     await interaction.reply(`✅ Valeur de **${itemName}** mise à jour : **${value}** (${trend}).`);
   }

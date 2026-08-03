@@ -42,7 +42,13 @@ client.on('interactionCreate', async interaction => {
       await handleButton(interaction);
       return;
     }
-  } catch (err) {
+
+      if (interaction.isModalSubmit && interaction.customId && interaction.customId.startsWith('message_modal_')) {
+        const handleModal = require('./events/modalHandler');
+        await handleModal(interaction);
+        return;
+      }
+    } catch (err) {
     console.error(err);
     if (interaction.isRepliable()) {
       const payload = { content: "❌ Une erreur est survenue.", ephemeral: true };

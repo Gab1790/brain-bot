@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getSheetValues } = require('../utils/sheetValues');
+const { getSheetValues, getGlobalAverage } = require('../utils/sheetValues');
 const { searchBrainrots, getBrainrotInfo } = require('../utils/fandomApi');
 const { getGuildConfig } = require('../utils/guildConfig');
 
@@ -95,7 +95,8 @@ module.exports = {
       .setTimestamp()
       .setFooter({ text: 'Sources : Google Sheet staff (trade) + Wiki Fandom (stats)' });
 
-    // ── Trade value (Google Sheet) ──────────────────────────────────────
+    // ── Trade value (local values) ──────────────────────────────────────
+    const globalAvg = getGlobalAverage(guildId);
     if (tradeItem) {
       const trendEmoji = TREND_EMOJI[tradeItem.trend] || '➖';
       embed.addFields({
@@ -110,10 +111,13 @@ module.exports = {
     } else {
       embed.addFields({
         name: '💰 Valeur de trade (P2P)',
-        value: '_Pas encore dans le sheet du staff_',
+        value: '_Pas encore dans la base locale_',
         inline: true,
       });
     }
+
+    // Show global average reference
+    embed.addFields({ name: '📈 Moyenne P2P globale', value: `${globalAvg.toLocaleString('fr-FR')} (référence)`, inline: true });
 
     // ── Game stats (Fandom wiki) ────────────────────────────────────────
     if (stats) {
@@ -137,5 +141,14 @@ module.exports = {
     }
 
     await interaction.editReply({ embeds: [embed] });
+
+    // If notify channel is set and this was a guild query, optionally post a brief note
+    try {
+      const cfg = getGuildConfig(guildId);
+      if (cfg && cfg.notifyChannelId) {
+        const ch = await interaction.guild.channels.fetch(cfg.notifyChannelId).catch(() => null);
+        if (ch) ch.send({ embeds: [embed] }).catch(() => {});
+      }
+    } catch (err) {}
   }
 };

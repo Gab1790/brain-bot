@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getSheetValues } = require('../utils/sheetValues');
+const { getSheetValues, getGlobalAverage } = require('../utils/sheetValues');
 
 function parseItems(raw) {
   return raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -45,6 +45,7 @@ module.exports = {
     else                verdict = '⚖️ Trade équilibré';
 
     const hasSheet = Object.keys(values).length > 0;
+    const globalAvg = getGlobalAverage(guildId);
 
     const embed = new EmbedBuilder()
       .setTitle('🔄 Comparateur de trade')
@@ -52,13 +53,14 @@ module.exports = {
         { name: 'Ton offre',     value: yourResult.details.join('\n')  || '—', inline: true },
         { name: 'Offre adverse', value: theirResult.details.join('\n') || '—', inline: true },
         { name: 'Total', value: `Toi: **${yourResult.total.toLocaleString('fr-FR')}** | Eux: **${theirResult.total.toLocaleString('fr-FR')}**` },
-        { name: 'Verdict', value: verdict }
+        { name: 'Verdict', value: verdict },
+        { name: '💡 Moyenne P2P globale', value: `${globalAvg.toLocaleString('fr-FR')} (utilisée comme référence)`, inline: false }
       )
       .setColor(diff >= 0 ? 0x2ecc71 : 0xe74c3c)
       .setFooter({
         text: hasSheet
-          ? '⚠️ Les items avec ⚠️ ne sont pas dans le sheet (valeur = 0).'
-          : '⚠️ Aucun sheet configuré. Utilisez /setup sheet_url pour en ajouter un.',
+          ? '⚠️ Les items avec ⚠️ ne sont pas dans la base locale (valeur = 0).'
+          : '⚠️ Aucune valeur locale trouvée. Utilisez /addvalue pour ajouter des valeurs.'
       });
 
     await interaction.editReply({ embeds: [embed] });
