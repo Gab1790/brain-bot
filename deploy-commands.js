@@ -16,23 +16,15 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
   try {
-    console.log(`🔄 Déploiement de ${commands.length} commande(s)...`);
+    console.log(`🔄 Déploiement global de ${commands.length} commande(s)...`);
+    console.log('⚠️  Les commandes globales peuvent prendre jusqu\'à 1h pour apparaître sur Discord.');
 
-    // Déploiement sur un seul serveur (instantané) - idéal pour le dev
-    if (process.env.GUILD_ID) {
-      await rest.put(
-        Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-        { body: commands }
-      );
-      console.log('✅ Commandes déployées sur le serveur (guild).');
-    } else {
-      // Déploiement global (peut prendre jusqu'à 1h pour apparaître)
-      await rest.put(
-        Routes.applicationCommands(process.env.CLIENT_ID),
-        { body: commands }
-      );
-      console.log('✅ Commandes déployées globalement.');
-    }
+    await rest.put(
+      Routes.applicationCommands(process.env.CLIENT_ID),
+      { body: commands }
+    );
+
+    console.log('✅ Commandes déployées globalement (tous les serveurs).');
   } catch (error) {
     console.error(error);
   }

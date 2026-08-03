@@ -1,10 +1,12 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { getGuildConfig } = require('../utils/guildConfig');
 
 async function createTicketChannel(interaction, type) {
   const guild = interaction.guild;
-  const categoryId = process.env.TICKET_CATEGORY_ID || null;
-  const staffRoleId = process.env.STAFF_ROLE_ID;
-  const mmRoleId = process.env.MIDDLEMAN_ROLE_ID;
+  const config = getGuildConfig(guild.id);
+  const categoryId = config.ticketCategoryId || null;
+  const staffRoleId = config.staffRoleId || null;
+  const mmRoleId = config.middlemanRoleId || null;
 
   const relevantRoleId = type === 'mm' ? (mmRoleId || staffRoleId) : staffRoleId;
   const prefix = type === 'mm' ? 'mm' : 'ticket';
@@ -47,7 +49,8 @@ async function createTicketChannel(interaction, type) {
 }
 
 async function closeTicketChannel(interaction) {
-  const logChannelId = process.env.LOG_CHANNEL_ID;
+  const config = getGuildConfig(interaction.guild.id);
+  const logChannelId = config.logChannelId || null;
 
   if (logChannelId) {
     const logChannel = interaction.guild.channels.cache.get(logChannelId);

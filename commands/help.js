@@ -10,9 +10,9 @@ module.exports = {
       .setTitle('📖 Commandes disponibles')
       .addFields(
         { name: '💰 Trade', value:
-          '`/value [item]` — Voir la valeur d\'un item\n' +
+          '`/value [item]` — Voir la valeur (trade + stats Fandom)\n' +
           '`/tradecalc` — Comparer deux offres\n' +
-          '`/addvalue` — [Staff] Ajouter/modifier une valeur'
+          '_Les valeurs de trade sont maintenues par le staff dans Google Sheets_'
         },
         { name: '🛡️ Sécurité', value:
           '`/mm` — Demander un middleman\n' +
@@ -20,7 +20,16 @@ module.exports = {
           '`/reputation @user` — Voir la réputation d\'un trader\n' +
           '`/blacklist` — [Staff] Gérer la blacklist scam'
         },
-        { name: '🎫 Support', value: '`/ticket` — Ouvrir le panneau de tickets' }
+        { name: '🎫 Support', value: '`/ticket` — Ouvrir le panneau de tickets' },
+        { name: '⚙️ Configuration (Admin)', value:
+          '`/setup voir` — Voir la config du serveur\n' +
+          '`/setup staff_role` — Définir le rôle Staff\n' +
+          '`/setup middleman_role` — Définir le rôle Middleman\n' +
+          '`/setup ticket_category` — Catégorie de tickets\n' +
+          '`/setup log_channel` — Salon de logs\n' +
+          '`/setup sheet_url` — 📊 Lier le Google Sheet de trade\n' +
+          '`/setup reset` — Réinitialiser la config'
+        }
       )
       .setColor(0x9b59b6)
       .setFooter({ text: 'Bot Brainrot Trade' });

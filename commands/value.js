@@ -1,50 +1,141 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { readData } = require('../utils/db');
+const { getSheetValues } = require('../utils/sheetValues');
+const { searchBrainrots, getBrainrotInfo } = require('../utils/fandomApi');
+const { getGuildConfig } = require('../utils/guildConfig');
+
+const TREND_EMOJI = { up: '📈', down: '📉', stable: '➖' };
+const RARITY_COLOR = {
+  Common:    0x95a5a6,
+  Uncommon:  0x2ecc71,
+  Rare:      0x3498db,
+  Epic:      0x9b59b6,
+  Legendary: 0xf1c40f,
+  Secret:    0xe74c3c,
+};
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('value')
-    .setDescription("Affiche la valeur estimée d'un item")
+    .setDescription("Affiche la valeur de trade et les stats d'un brainrot")
     .addStringOption(opt =>
       opt.setName('item')
-        .setDescription("Nom de l'item")
+        .setDescription("Nom du brainrot")
         .setRequired(true)
         .setAutocomplete(true)
     ),
 
   async autocomplete(interaction) {
-    const values = readData('values.json', {});
     const focused = interaction.options.getFocused().toLowerCase();
-    const matches = Object.keys(values)
-      .filter(name => name.toLowerCase().includes(focused))
-      .slice(0, 25);
-    await interaction.respond(matches.map(name => ({ name, value: name })));
+    if (!focused) return interaction.respond([]);
+
+    try {
+      // Combine local sheet values + Fandom suggestions
+      const [sheetVals, fandomSuggestions] = await Promise.allSettled([
+        getSheetValues(interaction.guildId),
+        searchBrainrots(focused),
+      ]);
+
+      const sheetNames = sheetVals.status === 'fulfilled'
+        ? Object.keys(sheetVals.value).filter(n => n.includes(focused))
+        : [];
+
+      const fandomNames = fandomSuggestions.status === 'fulfilled'
+        ? fandomSuggestions.value.map(n => n.toLowerCase())
+        : [];
+
+      // Merge, deduplicate, limit to 25
+      const merged = [...new Set([...sheetNames, ...fandomNames])].slice(0, 25);
+      await interaction.respond(merged.map(name => ({ name, value: name })));
+    } catch {
+      await interaction.respond([]);
+    }
   },
 
   async execute(interaction) {
-    const itemName = interaction.options.getString('item').toLowerCase();
-    const values = readData('values.json', {});
-    const item = values[itemName];
+    await interaction.deferReply();
 
-    if (!item) {
-      return interaction.reply({
-        content: `❌ Aucune valeur trouvée pour **${itemName}**. Demande à un membre du staff de l'ajouter avec \`/addvalue\`.`,
-        ephemeral: true
+    const itemName = interaction.options.getString('item').toLowerCase().trim();
+    const guildId  = interaction.guildId;
+
+    // Fetch both sources in parallel
+    const [sheetVals, fandomInfo] = await Promise.allSettled([
+      getSheetValues(guildId),
+      getBrainrotInfo(itemName),
+    ]);
+
+    const tradeItem = sheetVals.status === 'fulfilled'
+      ? sheetVals.value[itemName] || null
+      : null;
+
+    const stats = fandomInfo.status === 'fulfilled'
+      ? fandomInfo.value
+      : null;
+
+    // If we found nothing at all
+    if (!tradeItem && !stats) {
+      const hasSheet = !!getGuildConfig(guildId).sheetUrl;
+      return interaction.editReply({
+        content:
+          `❌ Aucune donnée trouvée pour **${itemName}**.\n` +
+          (!hasSheet
+            ? '💡 Aucun Google Sheet configuré. Un admin peut utiliser `/setup sheet_url` pour en ajouter un.\n'
+            : '💡 Vérifie l\'orthographe ou demande au staff de mettre à jour le sheet.\n') +
+          '💡 Ou consulte directement le wiki : ' +
+          `https://stealabrainrot.fandom.com/wiki/${encodeURIComponent(itemName)}`,
       });
     }
 
-    const trendEmoji = { up: '📈', down: '📉', stable: '➖' }[item.trend] || '➖';
+    const rarity    = stats?.rarity || null;
+    const embedColor = RARITY_COLOR[rarity] ?? 0x9b59b6;
+    const displayName = stats?.name || itemName;
 
     const embed = new EmbedBuilder()
-      .setTitle(`💰 Valeur de ${itemName}`)
-      .addFields(
-        { name: 'Valeur', value: `${item.value}`, inline: true },
-        { name: 'Tendance', value: trendEmoji, inline: true },
-        { name: 'Mise à jour', value: item.updatedAt || 'inconnue', inline: true }
-      )
-      .setColor(0x9b59b6)
-      .setTimestamp();
+      .setTitle(`🧠 ${displayName}`)
+      .setColor(embedColor)
+      .setTimestamp()
+      .setFooter({ text: 'Sources : Google Sheet staff (trade) + Wiki Fandom (stats)' });
 
-    await interaction.reply({ embeds: [embed] });
+    // ── Trade value (Google Sheet) ──────────────────────────────────────
+    if (tradeItem) {
+      const trendEmoji = TREND_EMOJI[tradeItem.trend] || '➖';
+      embed.addFields({
+        name: '💰 Valeur de trade (P2P)',
+        value: [
+          `**Valeur :** ${tradeItem.value.toLocaleString('fr-FR')}`,
+          `**Tendance :** ${trendEmoji} ${tradeItem.trend}`,
+          tradeItem.updatedAt ? `**Mis à jour :** ${tradeItem.updatedAt}` : '',
+        ].filter(Boolean).join('\n'),
+        inline: true,
+      });
+    } else {
+      embed.addFields({
+        name: '💰 Valeur de trade (P2P)',
+        value: '_Pas encore dans le sheet du staff_',
+        inline: true,
+      });
+    }
+
+    // ── Game stats (Fandom wiki) ────────────────────────────────────────
+    if (stats) {
+      embed.addFields({
+        name: '📊 Stats officielles (jeu)',
+        value: [
+          rarity   ? `**Rareté :** ${rarity}` : '',
+          stats.cost   ? `**Coût :** $${stats.cost}` : '',
+          stats.income ? `**Income :** $${stats.income}/s` : '',
+          stats.status ? `**Status :** ${stats.status}` : '',
+          stats.obtained ? `**Obtention :** ${stats.obtained}` : '',
+        ].filter(Boolean).join('\n') || '_Données non disponibles_',
+        inline: true,
+      });
+
+      embed.addFields({
+        name: '🔗 Wiki',
+        value: `[Voir sur le wiki Fandom](https://stealabrainrot.fandom.com/wiki/${encodeURIComponent(stats.name)})`,
+        inline: false,
+      });
+    }
+
+    await interaction.editReply({ embeds: [embed] });
   }
 };

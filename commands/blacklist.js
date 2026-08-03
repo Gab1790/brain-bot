@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { readData, writeData } = require('../utils/db');
+const { getGuildConfig } = require('../utils/guildConfig');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -18,7 +19,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const staffRoleId = process.env.STAFF_ROLE_ID;
+    const staffRoleId = getGuildConfig(interaction.guildId).staffRoleId;
     if (staffRoleId && !interaction.member.roles.cache.has(staffRoleId) &&
         !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
       return interaction.reply({ content: "❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral: true });
