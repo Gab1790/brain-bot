@@ -43,9 +43,11 @@ async function createTicketChannel(interaction, type) {
   );
 
   const mention = relevantRoleId ? `<@&${relevantRoleId}>` : '';
-  await channel.send({ content: `${interaction.user} ${mention}`, embeds: [embed], components: [closeRow] });
+  const sent = await channel.send({ content: `${interaction.user} ${mention}`, embeds: [embed], components: [closeRow] });
 
   await interaction.reply({ content: `✅ Ton ticket a été créé : ${channel}`, ephemeral: true });
+  // return the created channel and the welcome message if caller needs to post more
+  return { channel, welcomeMessage: sent };
 }
 
 async function closeTicketChannel(interaction) {
@@ -86,6 +88,91 @@ module.exports = async function handleButton(interaction) {
     const trade = trades[tradeId];
     if (!trade) {
       return interaction.reply({ content: "❌ Offre introuvable.", ephemeral: true });
+    }
+
+    // Handle confirm/reject from MM (buttons confirm_trade_<id> / reject_trade_<id>)
+    const confirmMatch = interaction.customId.match(/^(confirm_trade|reject_trade)_(trade_\d+)$/);
+    if (confirmMatch) {
+      const confirmAction = confirmMatch[1];
+      const tId = confirmMatch[2];
+      if (tId !== tradeId) {
+        return interaction.reply({ content: 'IDs mismatch', ephemeral: true });
+      }
+
+      const config = require('../utils/guildConfig').getGuildConfig(interaction.guild.id);
+      const mmRoleId = config.middlemanRoleId || config.staffRoleId || null;
+      const isMM = mmRoleId && interaction.member.roles.cache.has(mmRoleId);
+      const isMod = interaction.member.permissions.has(require('discord.js').PermissionFlagsBits.ManageMessages);
+      if (!isMM && !isMod) {
+        return interaction.reply({ content: '❌ Seuls les middlemen ou modérateurs peuvent confirmer.', ephemeral: true });
+      }
+
+      if (confirmAction === 'confirm_trade') {
+        trade.status = 'completed';
+        trade.completedBy = interaction.user.id;
+        trade.completedByTag = interaction.user.tag;
+        trade.completedAt = new Date().toISOString();
+        require('../utils/db').writeData('trades.json', trades);
+
+        // update original announcement if available
+        try {
+          if (trade.announcement && trade.announcement.channelId && trade.announcement.messageId) {
+            const channel = await interaction.client.channels.fetch(trade.announcement.channelId).catch(() => null);
+            if (channel) {
+              const msg = await channel.messages.fetch(trade.announcement.messageId).catch(() => null);
+              if (msg) {
+                const updatedEmbed = require('../utils/tradeEmbed').buildEmbedFromTrade(trade);
+                await msg.edit({ embeds: [updatedEmbed], components: [] }).catch(() => {});
+              }
+            }
+          }
+        } catch (err) {}
+
+        // update ticket message
+        try {
+          if (trade.ticketChannelId && trade.ticketMessageId) {
+            const tch = await interaction.client.channels.fetch(trade.ticketChannelId).catch(() => null);
+            if (tch) {
+              const tmsg = await tch.messages.fetch(trade.ticketMessageId).catch(() => null);
+              if (tmsg) {
+                const updatedEmbed = require('../utils/tradeEmbed').buildEmbedFromTrade(trade);
+                await tmsg.edit({ embeds: [updatedEmbed], components: [] }).catch(() => {});
+              }
+            }
+          }
+        } catch (err) {}
+
+        // notify author via DM
+        try {
+          const user = await interaction.client.users.fetch(trade.authorId);
+          await user.send(`✅ Ton trade ${trade.id} a été confirmé par ${interaction.user.tag} (middleman).`).catch(() => {});
+        } catch (err) {}
+
+        await interaction.reply({ content: '✅ Trade marqué comme terminé.', ephemeral: true });
+        return;
+      }
+
+      if (confirmAction === 'reject_trade') {
+        trade.status = 'cancelled';
+        trade.cancelledBy = interaction.user.id;
+        trade.cancelledAt = new Date().toISOString();
+        require('../utils/db').writeData('trades.json', trades);
+        try {
+          if (trade.announcement && trade.announcement.channelId && trade.announcement.messageId) {
+            const channel = await interaction.client.channels.fetch(trade.announcement.channelId).catch(() => null);
+            if (channel) {
+              const msg = await channel.messages.fetch(trade.announcement.messageId).catch(() => null);
+              if (msg) {
+                const updatedEmbed = require('../utils/tradeEmbed').buildEmbedFromTrade(trade);
+                await msg.edit({ embeds: [updatedEmbed], components: [] }).catch(() => {});
+              }
+            }
+          }
+        } catch (err) {}
+
+        await interaction.reply({ content: '✅ Trade rejeté / annulé par le middleman.', ephemeral: true });
+        return;
+      }
     }
 
     if (action === 'accept') {
@@ -132,16 +219,34 @@ module.exports = async function handleButton(interaction) {
       }
 
       if (action === 'requestmm') {
-        // Create a middleman ticket and mark trade as mm_requested
+        // Create a middleman ticket and mark trade as awaiting_mm
         const config = require('../utils/guildConfig').getGuildConfig(interaction.guild.id);
         const mmRole = config.middlemanRoleId || config.staffRoleId || null;
-        trade.status = 'mm_requested';
+        trade.status = 'awaiting_mm';
         trade.mmRequestedBy = interaction.user.id;
         trade.mmRequestedAt = new Date().toISOString();
         require('../utils/db').writeData('trades.json', trades);
 
         // Create ticket channel and notify mm role
-        await createTicketChannel(interaction, 'mm');
+        try {
+          const result = await createTicketChannel(interaction, 'mm');
+          const ch = result.channel;
+          // Post the trade embed in the ticket with confirm/reject buttons for MM
+          const { buildEmbedFromTrade } = require('../utils/tradeEmbed');
+          const tradeEmbed = buildEmbedFromTrade(trade);
+          const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+          const mmRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`confirm_trade_${tradeId}`).setLabel('Confirmer le trade').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`reject_trade_${tradeId}`).setLabel('Rejeter / Annuler').setStyle(ButtonStyle.Danger)
+          );
+          const sent = await ch.send({ content: mmRole ? `<@&${mmRole}>` : '', embeds: [tradeEmbed], components: [mmRow] });
+          trade.ticketChannelId = ch.id;
+          trade.ticketMessageId = sent.id;
+          require('../utils/db').writeData('trades.json', trades);
+        } catch (err) {
+          console.error('Failed to create mm ticket', err);
+        }
+
         try {
           await interaction.reply({ content: '✅ Middleman demandé, le staff a été notifié.', ephemeral: true });
         } catch {}

@@ -17,8 +17,10 @@ function buildEmbedFromTrade(trade) {
     embed.setFooter({ text: `Accepté par ${trade.acceptedByTag}` });
   } else if (trade.status === 'cancelled' && trade.cancelledBy) {
     embed.setFooter({ text: `Annulé` });
-  } else if (trade.status === 'mm_requested') {
+  } else if (trade.status === 'mm_requested' || trade.status === 'awaiting_mm') {
     embed.setFooter({ text: `Middleman demandé` });
+  } else if (trade.status === 'completed') {
+    embed.setFooter({ text: `Terminé par ${trade.completedByTag || 'un middleman'}` });
   }
 
   return embed;

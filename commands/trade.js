@@ -106,6 +106,14 @@ module.exports = {
     );
 
     await interaction.editReply({ embeds: [embed], components: [row] });
+    // store announcement message id/channel for later updates
+    try {
+      const posted = await interaction.fetchReply();
+      trades[id].announcement = { channelId: posted.channelId, messageId: posted.id };
+      writeData('trades.json', trades);
+    } catch (err) {
+      // ignore if fetchReply fails
+    }
 
     // If notify channel configured, post there
     const cfg = getGuildConfig(guildId);
