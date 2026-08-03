@@ -1,11 +1,17 @@
 /**
  * Fetches brainrot info from the stealabrainrot Fandom wiki API.
  * Returns rarity, cost, income from the infobox wikitext.
- * Results are cached for 1 hour to avoid rate limiting.
+ *
+ * NOTE: Fandom data is fetched in near real-time by default (no caching).
+ *       This provides freshly updated game stats from the wiki but may
+ *       increase the number of requests to the Fandom API. If rate
+ *       limiting becomes an issue, change CACHE_TTL_MS to a non-zero
+ *       value (milliseconds) to enable caching (e.g. 30_000 for 30s).
  */
 
 const cache = new Map(); // key -> { data, fetchedAt }
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+// 0 = no caching (always fetch fresh). Adjust if you encounter rate limits.
+const CACHE_TTL_MS = 0; // realtime
 
 const BASE = 'https://stealabrainrot.fandom.com/api.php';
 
