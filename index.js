@@ -20,6 +20,14 @@ for (const file of commandFiles) {
 
 client.once('ready', () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
+  // Run expiration job at startup and every 6 hours
+  try {
+    const { expireTrades } = require('./utils/expireTrades');
+    expireTrades(client, 7).catch(() => {});
+    setInterval(() => expireTrades(client, 7).catch(() => {}), 6 * 60 * 60 * 1000);
+  } catch (e) {
+    console.error('expireTrades not available', e);
+  }
 });
 
 client.on('interactionCreate', async interaction => {
