@@ -2,6 +2,8 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { readData, writeData } = require('../utils/db');
 const { getSheetValues, getGlobalAverage, invalidateCache } = require('../utils/sheetValues');
 const { getGuildConfig } = require('../utils/guildConfig');
+const fs = require('fs');
+const path = require('path');
 
 function parseItems(raw) {
   return raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -11,9 +13,11 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('trade')
     .setDescription('Créer une offre P2P')
-    .addStringOption(opt => opt.setName('offre').setDescription("Ce que tu proposes (séparé par des virgules)").setRequired(true))
-    .addStringOption(opt => opt.setName('demande').setDescription("Ce que tu veux en échange (séparé par des virgules)").setRequired(true))
-    .addStringOption(opt => opt.setName('paiement').setDescription('Moyen de paiement (ex: PayPal)').setRequired(false)),
+    .addStringOption(opt => opt.setName('offre').setDescription("Ce que tu proposes (séparé par des virgules)").setRequired(true).setAutocomplete(true))
+        .addStringOption(opt => opt.setName('demande').setDescription("Ce que tu veux en échange (séparé par des virgules)").setRequired(true).setAutocomplete(true))
+    .addStringOption(opt => opt.setName('paiement').setDescription('Moyen de paiement (ex: PayPal)').setRequired(false))
+    .addAttachmentOption(opt => opt.setName('image').setDescription('Image illustrative (optionnel)').setRequired(false)),
+
 
   async execute(interaction) {
     await interaction.deferReply();
@@ -102,22 +106,84 @@ module.exports = {
       .setTimestamp();
 
     const primaryRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`accept_${id}`).setLabel('Accepter').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`message_${id}`).setLabel('Envoyer un message').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`cancel_${id}`).setLabel('Annuler').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(`requestmm_${id}`).setLabel('Demander Middleman').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`proof_${id}`).setLabel('Ajouter preuve (paiement)').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId(`accept_${id}`).setLabel('Accepter').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`report_${id}`).setLabel('Signaler').setStyle(ButtonStyle.Danger)
     );
 
-    const secondaryRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`escrow_lock_${id}`).setLabel('Verrouiller en escrow').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`escrow_cancel_${id}`).setLabel('Annuler escrow').setStyle(ButtonStyle.Danger),
-      // Middleman quick-confirm button (visible to all but only usable by MM/mods)
-      new ButtonBuilder().setCustomId(`mm_confirm_${id}`).setLabel('Confirmer (MM)').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`escrow_release_${id}`).setLabel('Relâcher (MM)').setStyle(ButtonStyle.Success)
-    );
+    // Determine image to attach/display: prefer user-provided attachment, else look for local item images matching normalized names
+    const attachmentOption = interaction.options.getAttachment('image');
+    let filesToSend = undefined;
+    if (attachmentOption) {
+      embed.setImage(attachmentOption.url);
+    } else {
+      const tryNames = [...offerItems, ...demandItems];
+      const assetsDir = path.join(__dirname, '..', 'assets', 'item-images');
+      const exts = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+      let found = null;
+      for (const name of tryNames) {
+        const safeName = name.replace(/[^a-z0-9-_]/gi, '_');
+        for (const ext of exts) {
+          const fp = path.join(assetsDir, `${safeName}${ext}`);
+          if (fs.existsSync(fp)) {
+            found = { path: fp, name: `${safeName}${ext}` };
+            break;
+          }
+        }
+        if (found) break;
+      }
 
-    await interaction.editReply({ embeds: [embed], components: [primaryRow, secondaryRow] });
+      if (!found) {
+        // try cache then Fandom (if configured)
+        const cache = readData('imageCache.json', {});
+        let cachedUrl = null;
+        for (const name of tryNames) {
+          const safeName = name.replace(/[^a-z0-9-_]/gi, '_');
+          if (cache[safeName]) { cachedUrl = cache[safeName]; break; }
+        }
+
+        if (!cachedUrl) {
+          // attempt to query fandom for the first matching item name using configured wiki
+          const cfg = getGuildConfig(guildId) || {};
+          // Use Steal a Brainrot Wiki by default for all servers unless overridden in guild config
+          const domain = cfg.defaultItemWiki || 'stealabrainrot.fandom.com';
+          if (domain) {
+            try {
+              const { getFandomImage } = require('../utils/fandom');
+              for (const name of tryNames) {
+                const url = await getFandomImage(domain, name);
+                if (url) {
+                  cachedUrl = url;
+                  // store in cache by safeName
+                  const safeName = name.replace(/[^a-z0-9-_]/gi, '_');
+                  cache[safeName] = url;
+                  writeData('imageCache.json', cache);
+                  break;
+                }
+              }
+            } catch (e) {
+              // ignore fandom failures
+            }
+          }
+        }
+
+        if (cachedUrl) {
+          embed.setImage(cachedUrl);
+        }
+      }
+
+      if (found) {
+        // set embed image to attachment and prepare files array
+        embed.setImage(`attachment://${found.name}`);
+        filesToSend = [{ attachment: found.path, name: found.name }];
+      }
+    }
+
+    // Only publish the simplified primary row (message, accept, report), include files if found
+    const editOptions = { embeds: [embed], components: [primaryRow] };
+    if (filesToSend) editOptions.files = filesToSend;
+    await interaction.editReply(editOptions);
+
     // store announcement message id/channel for later updates
     try {
       const posted = await interaction.fetchReply();
@@ -132,8 +198,55 @@ module.exports = {
     if (cfg.notifyChannelId) {
       try {
         const ch = await interaction.guild.channels.fetch(cfg.notifyChannelId);
-        if (ch) ch.send({ embeds: [embed], components: [primaryRow, secondaryRow] }).catch(() => {});
+        if (ch) ch.send({ embeds: [embed], components: [primaryRow], files: filesToSend || undefined }).catch(() => {});
       } catch {}
+    }
+  },
+
+  async autocomplete(interaction) {
+    try {
+      const focused = interaction.options.getFocused();
+      const focusedName = interaction.options.getFocused(true).name; // 'offre' or 'demande'
+      const guildId = interaction.guildId;
+      const values = await getSheetValues(guildId);
+      const keys = Object.keys(values || {});
+
+      // If the user input looks like a monetary amount (only digits, currency symbols, dots, commas, spaces), do not suggest
+      const moneyPattern = /^[\d\s.,€$£¥₹+-]+$/;
+      if (moneyPattern.test(focused.trim())) {
+        return interaction.respond([]);
+      }
+
+      const q = focused.toLowerCase();
+      // support comma-separated partial input: consider last token
+      const lastToken = q.split(',').map(s=>s.trim()).filter(Boolean).pop() || q;
+
+      const suggestions = [];
+      for (const k of keys) {
+        if (k.toLowerCase().includes(lastToken)) {
+          suggestions.push({ name: k, value: k });
+          if (suggestions.length >= 25) break;
+        }
+      }
+
+      // if nothing found, try fuzzy bestMatch on lastToken
+      if (suggestions.length === 0 && lastToken.length > 1) {
+        try {
+          const { bestMatch } = require('../utils/fuzzy');
+          const fuzzy = bestMatch(lastToken, keys, 5);
+          if (fuzzy && fuzzy.length) {
+            for (const f of fuzzy) {
+              suggestions.push({ name: f, value: f });
+              if (suggestions.length >= 25) break;
+            }
+          }
+        } catch (e) {}
+      }
+
+      await interaction.respond(suggestions.slice(0, 25));
+    } catch (err) {
+      console.error('Autocomplete error', err);
+      await interaction.respond([]);
     }
   }
 };

@@ -1,15 +1,18 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType } = require('discord.js');
 const { getGuildConfig } = require('../utils/guildConfig');
 
-async function createTicketChannel(interaction, type) {
+async function createTicketChannel(interaction, type, opts = {}) {
   const guild = interaction.guild;
   const config = getGuildConfig(guild.id);
   const categoryId = config.ticketCategoryId || null;
   const staffRoleId = config.staffRoleId || null;
   const mmRoleId = config.middlemanRoleId || null;
+  const extraUserIds = Array.isArray(opts.extraUserIds) ? opts.extraUserIds : [];
+  const tradeId = opts.tradeId || null;
+  const suppressReply = !!opts.suppressReply;
 
   const relevantRoleId = type === 'mm' ? (mmRoleId || staffRoleId) : staffRoleId;
-  const prefix = type === 'mm' ? 'mm' : 'ticket';
+  const prefix = type === 'mm' ? 'mm' : (type === 'trade' ? 'trade' : 'ticket');
 
   const channelName = `${prefix}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
 
@@ -17,6 +20,9 @@ async function createTicketChannel(interaction, type) {
     { id: guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
     { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
   ];
+  for (const uid of extraUserIds) {
+    permissionOverwrites.push({ id: uid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+  }
   if (relevantRoleId) {
     permissionOverwrites.push({ id: relevantRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
   }
@@ -29,23 +35,36 @@ async function createTicketChannel(interaction, type) {
   });
 
   const embed = new EmbedBuilder()
-    .setTitle(type === 'mm' ? '🛡️ Nouvelle demande de Middleman' : '🎫 Nouveau ticket')
+    .setTitle(type === 'mm' ? '🛡️ Nouvelle demande de Middleman' : (type === 'trade' ? '🔒 Salon privé de trade' : '🎫 Nouveau ticket'))
     .setDescription(
       `Ouvert par ${interaction.user}\n\n` +
       (type === 'mm'
         ? "Merci de préciser :\n• Ton pseudo Roblox\n• Le pseudo de l'autre trader\n• Les items échangés des deux côtés\n\nUn middleman va arriver sous peu."
-        : "Explique ta demande, un membre du staff va te répondre.")
+        : (type === 'trade' ? "Salon privé pour compléter l'échange. Utilise le bouton ci-dessous pour demander un middleman si nécessaire." : "Explique ta demande, un membre du staff va te répondre."))
     )
-    .setColor(type === 'mm' ? 0x3498db : 0x95a5a6);
+    .setColor(type === 'mm' ? 0x3498db : (type === 'trade' ? 0x2ecc71 : 0x95a5a6));
 
   const closeRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger)
   );
 
-  const mention = relevantRoleId ? `<@&${relevantRoleId}>` : '';
-  const sent = await channel.send({ content: `${interaction.user} ${mention}`, embeds: [embed], components: [closeRow] });
+  const components = [closeRow];
 
-  await interaction.reply({ content: `✅ Ton ticket a été créé : ${channel}`, ephemeral: true });
+  // If this is a trade-specific private channel, add a requestmm button tied to the tradeId so participants can ask for MM from within
+  if (tradeId) {
+    const requestRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`requestmm_${tradeId}`).setLabel('Demander Middleman').setStyle(ButtonStyle.Secondary)
+    );
+    components.push(requestRow);
+  }
+
+  const mention = relevantRoleId ? `<@&${relevantRoleId}>` : '';
+  const sent = await channel.send({ content: `${interaction.user} ${mention}`, embeds: [embed], components });
+
+  if (!suppressReply) {
+    await interaction.reply({ content: `✅ Ton ticket a été créé : ${channel}`, ephemeral: true });
+  }
+
   // return the created channel and the welcome message if caller needs to post more
   return { channel, welcomeMessage: sent };
 }
@@ -250,6 +269,135 @@ module.exports = async function handleButton(interaction) {
     return interaction.reply({ content: '✅ Trade marqué comme terminé par middleman.', ephemeral: true });
   }
 
+  // Handlers for accept-createchannel and accept-requestmm triggered from the ephemeral choice after pressing Accept
+  const acceptCreateMatch = interaction.customId.match(/^accept_createchannel_(trade_\d+)$/);
+  if (acceptCreateMatch) {
+    const tradeId = acceptCreateMatch[1];
+    const trades = require('../utils/db').readData('trades.json', {});
+    const trade = trades[tradeId];
+    if (!trade) return interaction.reply({ content: '❌ Offre introuvable.', ephemeral: true });
+
+    try {
+      const result = await createTicketChannel(interaction, 'trade', { extraUserIds: [trade.authorId], tradeId, suppressReply: false });
+      if (result && result.channel && result.welcomeMessage) {
+        trade.ticketChannelId = result.channel.id;
+        trade.ticketMessageId = result.welcomeMessage.id;
+        require('../utils/db').writeData('trades.json', trades);
+      }
+    } catch (e) {
+      console.error('Failed to create private trade channel', e);
+      return interaction.reply({ content: '❌ Impossible de créer le salon privé.', ephemeral: true });
+    }
+    return;
+  }
+
+  const acceptRequestMMMatch = interaction.customId.match(/^accept_requestmm_(trade_\d+)$/);
+  if (acceptRequestMMMatch) {
+    const tradeId = acceptRequestMMMatch[1];
+    const trades = require('../utils/db').readData('trades.json', {});
+    const trade = trades[tradeId];
+    if (!trade) return interaction.reply({ content: '❌ Offre introuvable.', ephemeral: true });
+
+    // mark mm requested
+    trade.status = 'awaiting_mm';
+    trade.mmRequestedBy = interaction.user.id;
+    trade.mmRequestedAt = new Date().toISOString();
+    require('../utils/db').writeData('trades.json', trades);
+
+    try {
+      // create private trade channel but do not reply yet
+      const privateResult = await createTicketChannel(interaction, 'trade', { extraUserIds: [trade.authorId], tradeId, suppressReply: true });
+      if (privateResult && privateResult.channel && privateResult.welcomeMessage) {
+        trade.ticketChannelId = privateResult.channel.id;
+        trade.ticketMessageId = privateResult.welcomeMessage.id;
+      }
+
+      // create the MM ticket and let it reply to the interaction
+      const mmResult = await createTicketChannel(interaction, 'mm', { suppressReply: false });
+      // mmResult will have mm channel and welcome message if needed
+      require('../utils/db').writeData('trades.json', trades);
+    } catch (e) {
+      console.error('Failed to create private trade channel or mm ticket', e);
+      return interaction.reply({ content: '❌ Impossible de créer les salons demandés.', ephemeral: true });
+    }
+
+    return;
+  }
+
+  // Moderation action buttons posted to the log channel: warn_author_<tradeId>, close_report_<tradeId>
+  const warnMatch = interaction.customId.match(/^warn_author_(trade_\d+)$/);
+  if (warnMatch) {
+    const tradeId = warnMatch[1];
+    const trades = require('../utils/db').readData('trades.json', {});
+    const trade = trades[tradeId];
+    if (!trade) return interaction.reply({ content: '❌ Offre introuvable.', ephemeral: true });
+
+    // check staff perms
+    const isStaff = interaction.member.permissions.has(PermissionFlagsBits.ManageMessages) || (getGuildConfig(interaction.guild.id).staffRoleId && interaction.member.roles.cache.has(getGuildConfig(interaction.guild.id).staffRoleId));
+    if (!isStaff) return interaction.reply({ content: '❌ Action réservée au staff.', ephemeral: true });
+
+    try {
+      // find most recent unresolved report
+      const rpt = (trade.reports || []).slice().reverse().find(r => !r.resolved);
+      if (!rpt) return interaction.reply({ content: '❌ Aucun signalement ouvert trouvé pour ce trade.', ephemeral: true });
+
+      // send DM warning to author
+      try {
+        const user = await interaction.client.users.fetch(trade.authorId).catch(() => null);
+        if (user) await user.send(`⚠️ Avertissement concernant ton trade ${trade.id} : ${rpt.reason}\nAction: Avertissement par ${interaction.user.tag}`).catch(() => {});
+      } catch (e) {}
+
+      // mark report resolved
+      rpt.resolved = true;
+      rpt.resolvedBy = interaction.user.tag;
+      rpt.resolvedAt = new Date().toISOString();
+      require('../utils/db').writeData('trades.json', trades);
+
+      // log action
+      const cfg = getGuildConfig(interaction.guild.id);
+      if (cfg && cfg.logChannelId) {
+        const logCh = await interaction.client.channels.fetch(cfg.logChannelId).catch(() => null);
+        if (logCh) logCh.send(`⚠️ Avertissement envoyé à ${trade.authorTag} pour ${trade.id} par ${interaction.user.tag}`).catch(() => {});
+      }
+
+      return interaction.reply({ content: '✅ Avertissement envoyé et signalement marqué comme traité.', ephemeral: true });
+    } catch (e) {
+      console.error('Failed to warn author', e);
+      return interaction.reply({ content: '❌ Impossible d\'envoyer l\'avertissement.', ephemeral: true });
+    }
+  }
+
+  const closeReportMatch = interaction.customId.match(/^close_report_(trade_\d+)$/);
+  if (closeReportMatch) {
+    const tradeId = closeReportMatch[1];
+    const trades = require('../utils/db').readData('trades.json', {});
+    const trade = trades[tradeId];
+    if (!trade) return interaction.reply({ content: '❌ Offre introuvable.', ephemeral: true });
+
+    const isStaff = interaction.member.permissions.has(PermissionFlagsBits.ManageMessages) || (getGuildConfig(interaction.guild.id).staffRoleId && interaction.member.roles.cache.has(getGuildConfig(interaction.guild.id).staffRoleId));
+    if (!isStaff) return interaction.reply({ content: '❌ Action réservée au staff.', ephemeral: true });
+
+    try {
+      const rpt = (trade.reports || []).slice().reverse().find(r => !r.resolved);
+      if (!rpt) return interaction.reply({ content: '❌ Aucun signalement ouvert trouvé pour ce trade.', ephemeral: true });
+      rpt.resolved = true;
+      rpt.resolvedBy = interaction.user.tag;
+      rpt.resolvedAt = new Date().toISOString();
+      require('../utils/db').writeData('trades.json', trades);
+
+      const cfg = getGuildConfig(interaction.guild.id);
+      if (cfg && cfg.logChannelId) {
+        const logCh = await interaction.client.channels.fetch(cfg.logChannelId).catch(() => null);
+        if (logCh) logCh.send(`ℹ️ Signalement pour ${trade.id} clôturé par ${interaction.user.tag}`).catch(() => {});
+      }
+
+      return interaction.reply({ content: '✅ Signalement marqué comme clôturé.', ephemeral: true });
+    } catch (e) {
+      console.error('Failed to close report', e);
+      return interaction.reply({ content: '❌ Impossible de clôturer le signalement.', ephemeral: true });
+    }
+  }
+
   // Escrow controls: lock, release, cancel
   const escrowMatch = interaction.customId.match(/^(escrow_lock|escrow_release|escrow_cancel)_(trade_\d+)$/);
   if (escrowMatch) {
@@ -437,7 +585,7 @@ module.exports = async function handleButton(interaction) {
 
   // Trade buttons: accept_<id>, message_<id>, cancel_<id>
   // Also support requestmm and message modal ids
-  const idMatch = interaction.customId.match(/^(accept|message|cancel|requestmm)_(trade_\d+)$/);
+  const idMatch = interaction.customId.match(/^(accept|message|cancel|requestmm|report)_(trade_\d+)$/);
   if (idMatch) {
     const action = idMatch[1];
     const tradeId = idMatch[2];
@@ -449,9 +597,10 @@ module.exports = async function handleButton(interaction) {
 
 
     if (action === 'accept') {
-        if (trade.status !== 'open' && trade.status !== 'mm_requested') {
+      if (trade.status !== 'open' && trade.status !== 'mm_requested') {
         return interaction.reply({ content: `❌ Ce trade n'est pas ouvert (status=${trade.status}).`, ephemeral: true });
       }
+
       const hasProof = trade.paymentProof && trade.paymentProof.length > 0;
       trade.status = hasProof ? 'accepted' : 'awaiting_proof';
       trade.acceptedBy = interaction.user.id;
@@ -459,17 +608,16 @@ module.exports = async function handleButton(interaction) {
       trade.acceptedAt = new Date().toISOString();
       require('../utils/db').writeData('trades.json', trades);
 
-        // update embed message using reconstructed embed from trade
-      try {
-        const msg = interaction.message;
-          const updatedEmbed = require('../utils/tradeEmbed').buildEmbedFromTrade(trade);
-          await interaction.update({ embeds: [updatedEmbed], components: [] });
-        } catch (err) {
-          await interaction.reply({ content: `✅ Offre acceptée par ${interaction.user.tag}`, ephemeral: true });
-        }
+      // Ask the accepter whether to create a private channel or also request a middleman
+      const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+      const choiceRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`accept_createchannel_${tradeId}`).setLabel('Créer salon privé').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`accept_requestmm_${tradeId}`).setLabel('Créer salon + Demander MM').setStyle(ButtonStyle.Secondary)
+      );
 
-        return;
-      }
+      await interaction.reply({ content: 'Souhaitez-vous créer un salon privé pour compléter le trade ?', components: [choiceRow], ephemeral: true });
+      return;
+    }
 
       if (action === 'message') {
         // Show modal to collect a message to send to the author
@@ -484,6 +632,27 @@ module.exports = async function handleButton(interaction) {
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(true)
           .setPlaceholder('Écris ton message ici...');
+
+        const row = new ActionRowBuilder().addComponents(input);
+        modal.addComponents(row);
+
+        await interaction.showModal(modal);
+        return;
+      }
+
+      if (action === 'report') {
+        // Show modal to collect a report reason
+        const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+        const modal = new ModalBuilder()
+          .setCustomId(`report_modal_${tradeId}`)
+          .setTitle(`Signaler l'offre ${tradeId}`);
+
+        const input = new TextInputBuilder()
+          .setCustomId('reason_text')
+          .setLabel('Raison du signalement')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setPlaceholder('Explique brièvement pourquoi tu signales cette offre...');
 
         const row = new ActionRowBuilder().addComponents(input);
         modal.addComponents(row);
