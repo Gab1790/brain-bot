@@ -132,6 +132,45 @@ module.exports = {
         }
         if (found) break;
       }
+
+      if (!found) {
+        // try cache then Fandom (if configured)
+        const cache = readData('imageCache.json', {});
+        let cachedUrl = null;
+        for (const name of tryNames) {
+          const safeName = name.replace(/[^a-z0-9-_]/gi, '_');
+          if (cache[safeName]) { cachedUrl = cache[safeName]; break; }
+        }
+
+        if (!cachedUrl) {
+          // attempt to query fandom for the first matching item name using configured wiki
+          const cfg = getGuildConfig(guildId) || {};
+          const domain = cfg.defaultItemWiki || null; // e.g. 'game.fandom.com'
+          if (domain) {
+            try {
+              const { getFandomImage } = require('../utils/fandom');
+              for (const name of tryNames) {
+                const url = await getFandomImage(domain, name);
+                if (url) {
+                  cachedUrl = url;
+                  // store in cache by safeName
+                  const safeName = name.replace(/[^a-z0-9-_]/gi, '_');
+                  cache[safeName] = url;
+                  writeData('imageCache.json', cache);
+                  break;
+                }
+              }
+            } catch (e) {
+              // ignore fandom failures
+            }
+          }
+        }
+
+        if (cachedUrl) {
+          embed.setImage(cachedUrl);
+        }
+      }
+
       if (found) {
         // set embed image to attachment and prepare files array
         embed.setImage(`attachment://${found.name}`);
