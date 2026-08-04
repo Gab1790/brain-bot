@@ -102,22 +102,13 @@ module.exports = {
       .setTimestamp();
 
     const primaryRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`accept_${id}`).setLabel('Accepter').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`message_${id}`).setLabel('Envoyer un message').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`cancel_${id}`).setLabel('Annuler').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(`requestmm_${id}`).setLabel('Demander Middleman').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`proof_${id}`).setLabel('Ajouter preuve (paiement)').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId(`accept_${id}`).setLabel('Accepter').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`report_${id}`).setLabel('Signaler').setStyle(ButtonStyle.Danger)
     );
 
-    const secondaryRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`escrow_lock_${id}`).setLabel('Verrouiller en escrow').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`escrow_cancel_${id}`).setLabel('Annuler escrow').setStyle(ButtonStyle.Danger),
-      // Middleman quick-confirm button (visible to all but only usable by MM/mods)
-      new ButtonBuilder().setCustomId(`mm_confirm_${id}`).setLabel('Confirmer (MM)').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`escrow_release_${id}`).setLabel('Relâcher (MM)').setStyle(ButtonStyle.Success)
-    );
-
-    await interaction.editReply({ embeds: [embed], components: [primaryRow, secondaryRow] });
+    // Only publish the simplified primary row (message, accept, report)
+    await interaction.editReply({ embeds: [embed], components: [primaryRow] });
     // store announcement message id/channel for later updates
     try {
       const posted = await interaction.fetchReply();
