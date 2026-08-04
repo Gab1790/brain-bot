@@ -145,7 +145,8 @@ module.exports = {
         if (!cachedUrl) {
           // attempt to query fandom for the first matching item name using configured wiki
           const cfg = getGuildConfig(guildId) || {};
-          const domain = cfg.defaultItemWiki || null; // e.g. 'game.fandom.com'
+          // Use Steal a Brainrot Wiki by default for all servers unless overridden in guild config
+          const domain = cfg.defaultItemWiki || 'stealabrainrot.fandom.com';
           if (domain) {
             try {
               const { getFandomImage } = require('../utils/fandom');
