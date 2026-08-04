@@ -2,6 +2,8 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { readData, writeData } = require('../utils/db');
 const { getSheetValues, getGlobalAverage, invalidateCache } = require('../utils/sheetValues');
 const { getGuildConfig } = require('../utils/guildConfig');
+const fs = require('fs');
+const path = require('path');
 
 function parseItems(raw) {
   return raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -13,7 +15,9 @@ module.exports = {
     .setDescription('Créer une offre P2P')
     .addStringOption(opt => opt.setName('offre').setDescription("Ce que tu proposes (séparé par des virgules)").setRequired(true))
     .addStringOption(opt => opt.setName('demande').setDescription("Ce que tu veux en échange (séparé par des virgules)").setRequired(true))
-    .addStringOption(opt => opt.setName('paiement').setDescription('Moyen de paiement (ex: PayPal)').setRequired(false)),
+    .addStringOption(opt => opt.setName('paiement').setDescription('Moyen de paiement (ex: PayPal)').setRequired(false))
+    .addAttachmentOption(opt => opt.setName('image').setDescription('Image illustrative (optionnel)').setRequired(false)),
+
 
   async execute(interaction) {
     await interaction.deferReply();
@@ -107,8 +111,39 @@ module.exports = {
       new ButtonBuilder().setCustomId(`report_${id}`).setLabel('Signaler').setStyle(ButtonStyle.Danger)
     );
 
-    // Only publish the simplified primary row (message, accept, report)
-    await interaction.editReply({ embeds: [embed], components: [primaryRow] });
+    // Determine image to attach/display: prefer user-provided attachment, else look for local item images matching normalized names
+    const attachmentOption = interaction.options.getAttachment('image');
+    let filesToSend = undefined;
+    if (attachmentOption) {
+      embed.setImage(attachmentOption.url);
+    } else {
+      const tryNames = [...offerItems, ...demandItems];
+      const assetsDir = path.join(__dirname, '..', 'assets', 'item-images');
+      const exts = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+      let found = null;
+      for (const name of tryNames) {
+        const safeName = name.replace(/[^a-z0-9-_]/gi, '_');
+        for (const ext of exts) {
+          const fp = path.join(assetsDir, `${safeName}${ext}`);
+          if (fs.existsSync(fp)) {
+            found = { path: fp, name: `${safeName}${ext}` };
+            break;
+          }
+        }
+        if (found) break;
+      }
+      if (found) {
+        // set embed image to attachment and prepare files array
+        embed.setImage(`attachment://${found.name}`);
+        filesToSend = [{ attachment: found.path, name: found.name }];
+      }
+    }
+
+    // Only publish the simplified primary row (message, accept, report), include files if found
+    const editOptions = { embeds: [embed], components: [primaryRow] };
+    if (filesToSend) editOptions.files = filesToSend;
+    await interaction.editReply(editOptions);
+
     // store announcement message id/channel for later updates
     try {
       const posted = await interaction.fetchReply();
@@ -123,7 +158,7 @@ module.exports = {
     if (cfg.notifyChannelId) {
       try {
         const ch = await interaction.guild.channels.fetch(cfg.notifyChannelId);
-        if (ch) ch.send({ embeds: [embed], components: [primaryRow, secondaryRow] }).catch(() => {});
+        if (ch) ch.send({ embeds: [embed], components: [primaryRow], files: filesToSend || undefined }).catch(() => {});
       } catch {}
     }
   }
