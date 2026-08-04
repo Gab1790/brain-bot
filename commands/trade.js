@@ -13,8 +13,8 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('trade')
     .setDescription('Créer une offre P2P')
-    .addStringOption(opt => opt.setName('offre').setDescription("Ce que tu proposes (séparé par des virgules)").setRequired(true))
-    .addStringOption(opt => opt.setName('demande').setDescription("Ce que tu veux en échange (séparé par des virgules)").setRequired(true))
+    .addStringOption(opt => opt.setName('offre').setDescription("Ce que tu proposes (séparé par des virgules)").setRequired(true).setAutocomplete(true))
+        .addStringOption(opt => opt.setName('demande').setDescription("Ce que tu veux en échange (séparé par des virgules)").setRequired(true).setAutocomplete(true))
     .addStringOption(opt => opt.setName('paiement').setDescription('Moyen de paiement (ex: PayPal)').setRequired(false))
     .addAttachmentOption(opt => opt.setName('image').setDescription('Image illustrative (optionnel)').setRequired(false)),
 
@@ -200,6 +200,53 @@ module.exports = {
         const ch = await interaction.guild.channels.fetch(cfg.notifyChannelId);
         if (ch) ch.send({ embeds: [embed], components: [primaryRow], files: filesToSend || undefined }).catch(() => {});
       } catch {}
+    }
+  },
+
+  async autocomplete(interaction) {
+    try {
+      const focused = interaction.options.getFocused();
+      const focusedName = interaction.options.getFocused(true).name; // 'offre' or 'demande'
+      const guildId = interaction.guildId;
+      const values = await getSheetValues(guildId);
+      const keys = Object.keys(values || {});
+
+      // If the user input looks like a monetary amount (only digits, currency symbols, dots, commas, spaces), do not suggest
+      const moneyPattern = /^[\d\s.,€$£¥₹+-]+$/;
+      if (moneyPattern.test(focused.trim())) {
+        return interaction.respond([]);
+      }
+
+      const q = focused.toLowerCase();
+      // support comma-separated partial input: consider last token
+      const lastToken = q.split(',').map(s=>s.trim()).filter(Boolean).pop() || q;
+
+      const suggestions = [];
+      for (const k of keys) {
+        if (k.toLowerCase().includes(lastToken)) {
+          suggestions.push({ name: k, value: k });
+          if (suggestions.length >= 25) break;
+        }
+      }
+
+      // if nothing found, try fuzzy bestMatch on lastToken
+      if (suggestions.length === 0 && lastToken.length > 1) {
+        try {
+          const { bestMatch } = require('../utils/fuzzy');
+          const fuzzy = bestMatch(lastToken, keys, 5);
+          if (fuzzy && fuzzy.length) {
+            for (const f of fuzzy) {
+              suggestions.push({ name: f, value: f });
+              if (suggestions.length >= 25) break;
+            }
+          }
+        } catch (e) {}
+      }
+
+      await interaction.respond(suggestions.slice(0, 25));
+    } catch (err) {
+      console.error('Autocomplete error', err);
+      await interaction.respond([]);
     }
   }
 };
