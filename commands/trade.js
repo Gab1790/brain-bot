@@ -217,28 +217,43 @@ module.exports = {
         return interaction.respond([]);
       }
 
-      const q = focused.toLowerCase();
       // support comma-separated partial input: consider last token
-      const lastToken = q.split(',').map(s=>s.trim()).filter(Boolean).pop() || q;
+      const parts = focused.split(',');
+      const lastTokenRaw = parts.pop() || '';
+      const lastToken = lastTokenRaw.trim().toLowerCase();
+      const prefix = parts.length > 0 ? parts.join(',') + ', ' : '';
 
       const suggestions = [];
+      
+      // 1. Exact or partial match in local keys
       for (const k of keys) {
         if (k.toLowerCase().includes(lastToken)) {
-          suggestions.push({ name: k, value: k });
+          suggestions.push({ name: k, value: prefix + k });
           if (suggestions.length >= 25) break;
         }
       }
 
-      // if nothing found, try fuzzy bestMatch on lastToken
-      if (suggestions.length === 0 && lastToken.length > 1) {
+      // 2. Fandom Wiki Search for "brainrots"
+      if (suggestions.length < 25 && lastToken.length > 1) {
+        try {
+          const { searchBrainrots } = require('../utils/fandomApi');
+          const fandomResults = await searchBrainrots(lastToken);
+          for (const res of fandomResults) {
+            if (!suggestions.find(s => s.name.toLowerCase() === res.toLowerCase())) {
+              suggestions.push({ name: res, value: prefix + res });
+              if (suggestions.length >= 25) break;
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 3. Fuzzy match on local keys if still nothing/little found
+      if (suggestions.length < 25 && lastToken.length > 1) {
         try {
           const { bestMatch } = require('../utils/fuzzy');
           const fuzzy = bestMatch(lastToken, keys, 5);
-          if (fuzzy && fuzzy.length) {
-            for (const f of fuzzy) {
-              suggestions.push({ name: f, value: f });
-              if (suggestions.length >= 25) break;
-            }
+          if (fuzzy && !suggestions.find(s => s.name.toLowerCase() === fuzzy.toLowerCase())) {
+            suggestions.push({ name: fuzzy, value: prefix + fuzzy });
           }
         } catch (e) {}
       }
