@@ -81,4 +81,43 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
+import fetch from "node-fetch";
+
+// ID du salon vocal à mettre à jour
+const VOICE_CHANNEL_ID = "1537968234177888356";
+
+// URL de ton API Render
+const API_URL = "https://youtube-api-e8op.onrender.com/";
+
+async function updateYoutubeStats(client) {
+  try {
+    const res = await fetch(API_URL);
+    const data = await res.json();
+
+    const subs = data?.data?.count;
+    if (!subs) return console.log("Impossible de récupérer les abonnés");
+
+    const channel = client.channels.cache.get(VOICE_CHANNEL_ID);
+    if (!channel) return console.log("Salon introuvable");
+
+    await channel.setName(`📊 Abonnés YouTube : ${subs}`);
+    console.log("Salon mis à jour :", subs);
+
+  } catch (err) {
+    console.error("Erreur mise à jour YouTube :", err);
+  }
+}
+
+// Mise à jour toutes les 5 minutes
+client.once("ready", () => {
+  console.log("Mise à jour YouTube activée");
+
+  updateYoutubeStats(client); // première mise à jour
+
+  setInterval(() => {
+    updateYoutubeStats(client);
+  }, 5 * 60 * 1000);
+});
+
+
 client.login(process.env.DISCORD_TOKEN);
