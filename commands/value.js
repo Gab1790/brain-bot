@@ -25,30 +25,8 @@ module.exports = {
     ),
 
   async autocomplete(interaction) {
-    const focused = interaction.options.getFocused().toLowerCase();
-    if (!focused) return interaction.respond([]);
-
-    try {
-      // Combine local sheet values + Fandom suggestions
-      const [sheetVals, fandomSuggestions] = await Promise.allSettled([
-        getSheetValues(interaction.guildId),
-        searchBrainrots(focused),
-      ]);
-
-      const sheetNames = sheetVals.status === 'fulfilled'
-        ? Object.keys(sheetVals.value).filter(n => n.includes(focused))
-        : [];
-
-      const fandomNames = fandomSuggestions.status === 'fulfilled'
-        ? fandomSuggestions.value.map(n => n.toLowerCase())
-        : [];
-
-      // Merge, deduplicate, limit to 25
-      const merged = [...new Set([...sheetNames, ...fandomNames])].slice(0, 25);
-      await interaction.respond(merged.map(name => ({ name, value: name })));
-    } catch {
-      await interaction.respond([]);
-    }
+    const { handleBrainrotAutocomplete } = require('../utils/autocomplete');
+    await handleBrainrotAutocomplete(interaction, false);
   },
 
   async execute(interaction) {

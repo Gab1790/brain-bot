@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('addvalue')
     .setDescription("[Staff] Ajoute ou met à jour la valeur d'un item")
-    .addStringOption(opt => opt.setName('item').setDescription("Nom de l'item").setRequired(true))
+    .addStringOption(opt => opt.setName('item').setDescription("Nom de l'item").setRequired(true).setAutocomplete(true))
     .addIntegerOption(opt => opt.setName('valeur').setDescription("Valeur de l'item").setRequired(true))
     .addStringOption(opt =>
       opt.setName('tendance')
@@ -17,6 +17,11 @@ module.exports = {
           { name: 'Stable', value: 'stable' }
         )
     ),
+
+  async autocomplete(interaction) {
+    const { handleBrainrotAutocomplete } = require('../utils/autocomplete');
+    await handleBrainrotAutocomplete(interaction, false);
+  },
 
   async execute(interaction) {
     const staffRoleId = getGuildConfig(interaction.guildId).staffRoleId;

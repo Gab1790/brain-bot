@@ -8,7 +8,12 @@ module.exports = {
     .setDescription('Gérer / parcourir les offres P2P')
     .addSubcommand(sub => sub.setName('list').setDescription('Liste les offres ouvertes').addStringOption(opt => opt.setName('filter').setDescription('open|mine|all')))
     .addSubcommand(sub => sub.setName('view').setDescription('Affiche une offre par son id').addStringOption(opt => opt.setName('id').setDescription('ID du trade').setRequired(true)))
-    .addSubcommand(sub => sub.setName('search').setDescription('Recherche des offres contenant un item').addStringOption(opt => opt.setName('q').setDescription('texte à chercher').setRequired(true))),
+    .addSubcommand(sub => sub.setName('search').setDescription('Recherche des offres contenant un item').addStringOption(opt => opt.setName('q').setDescription('texte à chercher').setRequired(true).setAutocomplete(true))),
+
+  async autocomplete(interaction) {
+    const { handleBrainrotAutocomplete } = require('../utils/autocomplete');
+    await handleBrainrotAutocomplete(interaction, false);
+  },
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();

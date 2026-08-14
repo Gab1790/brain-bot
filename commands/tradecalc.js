@@ -23,9 +23,14 @@ module.exports = {
     .setName('tradecalc')
     .setDescription('Compare deux offres de trade (sépare les items par des virgules)')
     .addStringOption(opt =>
-      opt.setName('votre_offre').setDescription('Ex: 1x1x1x1, john doe').setRequired(true))
+      opt.setName('votre_offre').setDescription('Ex: 1x1x1x1, john doe').setRequired(true).setAutocomplete(true))
     .addStringOption(opt =>
-      opt.setName('offre_adverse').setDescription('Ex: rocco disco, bunito').setRequired(true)),
+      opt.setName('offre_adverse').setDescription('Ex: rocco disco, bunito').setRequired(true).setAutocomplete(true)),
+
+  async autocomplete(interaction) {
+    const { handleBrainrotAutocomplete } = require('../utils/autocomplete');
+    await handleBrainrotAutocomplete(interaction, true);
+  },
 
   async execute(interaction) {
     await interaction.deferReply();
