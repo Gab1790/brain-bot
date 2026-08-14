@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { readData, writeData } = require('../utils/db');
-const { getSheetValues, getGlobalAverage, invalidateCache } = require('../utils/sheetValues');
+const { getSheetValues, getGlobalAverage, invalidateCache, getDynamicItemValue } = require('../utils/sheetValues');
+const { getBrainrotInfo } = require('../utils/fandomApi');
 const { getGuildConfig } = require('../utils/guildConfig');
 const fs = require('fs');
 const path = require('path');
@@ -39,6 +40,7 @@ module.exports = {
     // normalization: try exact match, then startsWith/includes, then fuzzy best match, then fallback to original
     const { bestMatch } = require('../utils/fuzzy');
     const normalize = (name) => {
+      if (!isNaN(Number(name))) return name; // keep numeric as is
       const n = name.toLowerCase().trim();
       if (values[n]) return n;
       const keys = Object.keys(values);
@@ -54,10 +56,40 @@ module.exports = {
     const offerItems = offerItemsRaw.map(normalize);
     const demandItems = demandItemsRaw.map(normalize);
 
-    // Compute totals using local values
-    const sum = items => items.reduce((acc, name) => acc + ((values[name] && values[name].value) || 0), 0);
-    const offerTotal = sum(offerItems);
-    const demandTotal = sum(demandItems);
+    const getCost = (stats) => {
+      if (!stats || !stats.cost) return 0;
+      const num = Number(stats.cost.replace(/[^0-9.-]+/g, ""));
+      return isNaN(num) ? 0 : num;
+    };
+
+    const offerFandomInfos = await Promise.all(offerItems.map(async name => {
+      if (!isNaN(Number(name))) return { isNumeric: true, value: Number(name) };
+      return { isNumeric: false, stats: await getBrainrotInfo(name) };
+    }));
+    const demandFandomInfos = await Promise.all(demandItems.map(async name => {
+      if (!isNaN(Number(name))) return { isNumeric: true, value: Number(name) };
+      return { isNumeric: false, stats: await getBrainrotInfo(name) };
+    }));
+
+    const sumP2P = (items) => items.reduce((acc, name) => {
+      if (!isNaN(Number(name))) return acc + Number(name);
+      return acc + getDynamicItemValue(name, guildId);
+    }, 0);
+    
+    const sumFandom = (infos) => infos.reduce((acc, info) => {
+      if (info.isNumeric) return acc + info.value;
+      return acc + getCost(info.stats);
+    }, 0);
+
+    const offerTotalP2P = sumP2P(offerItems);
+    const demandTotalP2P = sumP2P(demandItems);
+    const offerTotalFandom = sumFandom(offerFandomInfos);
+    const demandTotalFandom = sumFandom(demandFandomInfos);
+    
+    // For backwards compatibility in db schema if needed
+    const offerTotal = offerTotalP2P;
+    const demandTotal = demandTotalP2P;
+    
     const globalAvg = getGlobalAverage(guildId);
 
     // Rate limiting: max 5 trades per hour per user
@@ -92,17 +124,26 @@ module.exports = {
     writeData('trades.json', trades);
     invalidateCache(guildId);
 
-    // Build embed + buttons
+    const diff = demandTotalP2P - offerTotalP2P;
+    let verdict;
+    if (diff > 0)       verdict = `✅ Offre adverse plus avantageuse pour toi (+${diff.toLocaleString('fr-FR')})`;
+    else if (diff < 0)  verdict = `⚠️ Tu donnes plus que tu ne reçois (${diff.toLocaleString('fr-FR')})`;
+    else                verdict = '⚖️ Trade équilibré';
+
+    const formatItems = (items) => items.map(i => !isNaN(Number(i)) ? `**+${Number(i).toLocaleString('fr-FR')} 💰**` : i).join(', ');
+
     const embed = new EmbedBuilder()
       .setTitle('🔖 Nouvelle offre P2P')
       .setDescription(`Proposé par **${author.tag}**`)
       .addFields(
-        { name: '📦 Offre', value: offerItems.join(', '), inline: true },
-        { name: '🎯 Demande', value: demandItems.join(', '), inline: true },
+        { name: '📦 Offre', value: formatItems(offerItems), inline: true },
+        { name: '🎯 Demande', value: formatItems(demandItems), inline: true },
         { name: '💳 Paiement', value: payment, inline: true },
-        { name: '💰 Totaux', value: `Offre: **${offerTotal.toLocaleString('fr-FR')}** | Demande: **${demandTotal.toLocaleString('fr-FR')}**`, inline: false },
-        { name: '📈 Moyenne P2P globale', value: `${globalAvg.toLocaleString('fr-FR')} (référence)`, inline: false }
+        { name: '💰 Totaux (P2P dynamique)', value: `Offre: **${offerTotalP2P.toLocaleString('fr-FR')}** | Demande: **${demandTotalP2P.toLocaleString('fr-FR')}**`, inline: false },
+        { name: '🎮 Totaux (Fandom in-game)', value: `Offre: **${offerTotalFandom.toLocaleString('fr-FR')}** | Demande: **${demandTotalFandom.toLocaleString('fr-FR')}**`, inline: false },
+        { name: '⚖️ Verdict P2P', value: verdict, inline: false }
       )
+      .setColor(diff >= 0 ? 0x2ecc71 : 0xe74c3c)
       .setTimestamp();
 
     const primaryRow = new ActionRowBuilder().addComponents(

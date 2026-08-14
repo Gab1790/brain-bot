@@ -78,4 +78,61 @@ function invalidateCache(guildId) {
   cache.delete(guildId);
 }
 
-module.exports = { getSheetValues, invalidateCache, getGlobalAverage };
+/**
+ * Calculates a dynamic P2P value for an item based on its past completed trades.
+ */
+function getDynamicItemValue(itemName, guildId) {
+  // If the item itself is a numeric value, just return it.
+  if (!isNaN(Number(itemName))) return Number(itemName);
+
+  let values = {};
+  const cached = cache.get(guildId);
+  if (cached && cached.values) {
+    values = cached.values;
+  } else {
+    const allValues = readData('values.json', {});
+    if (allValues[guildId]) values = allValues[guildId];
+    else if (allValues['_global']) values = allValues['_global'];
+    else values = allValues;
+  }
+
+  const baseValue = values[itemName] ? values[itemName].value : 0;
+  
+  const getBaseVal = (name) => {
+    if (!isNaN(Number(name))) return Number(name);
+    return values[name] ? values[name].value : 0;
+  };
+
+  const trades = readData('trades.json', {});
+  const completedTrades = Object.values(trades).filter(t => t.guildId === guildId && t.status === 'completed');
+  
+  const deducedValues = [];
+  
+  for (const trade of completedTrades) {
+    const isOffer = trade.offer.includes(itemName);
+    const isDemand = trade.demand.includes(itemName);
+    
+    if (isOffer || isDemand) {
+      const mySide = isOffer ? trade.offer : trade.demand;
+      const otherSide = isOffer ? trade.demand : trade.offer;
+      
+      const otherSideBaseTotal = otherSide.reduce((sum, item) => sum + getBaseVal(item), 0);
+      const mySideBaseTotal = mySide.reduce((sum, item) => sum + getBaseVal(item), 0);
+      
+      let deduced = 0;
+      if (mySideBaseTotal > 0) {
+        deduced = otherSideBaseTotal * (baseValue / mySideBaseTotal);
+      } else {
+        deduced = otherSideBaseTotal / mySide.length;
+      }
+      deducedValues.push(deduced);
+    }
+  }
+  
+  if (deducedValues.length === 0) return baseValue;
+  
+  const sum = deducedValues.reduce((a, b) => a + b, 0);
+  return Math.round(sum / deducedValues.length);
+}
+
+module.exports = { getSheetValues, invalidateCache, getGlobalAverage, getDynamicItemValue };

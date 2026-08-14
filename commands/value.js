@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getSheetValues, getGlobalAverage } = require('../utils/sheetValues');
+const { getSheetValues, getGlobalAverage, getDynamicItemValue } = require('../utils/sheetValues');
 const { searchBrainrots, getBrainrotInfo } = require('../utils/fandomApi');
 const { getGuildConfig } = require('../utils/guildConfig');
 
@@ -76,11 +76,13 @@ module.exports = {
     // ── Trade value (local values) ──────────────────────────────────────
     const globalAvg = getGlobalAverage(guildId);
     if (tradeItem) {
+      const dynamicVal = getDynamicItemValue(itemName, guildId);
       const trendEmoji = TREND_EMOJI[tradeItem.trend] || '➖';
       embed.addFields({
         name: '💰 Valeur de trade (P2P)',
         value: [
-          `**Valeur :** ${tradeItem.value.toLocaleString('fr-FR')}`,
+          `**Valeur de base :** ${tradeItem.value.toLocaleString('fr-FR')}`,
+          `**Moyenne dynamique :** ${dynamicVal.toLocaleString('fr-FR')} (trades passés)`,
           `**Tendance :** ${trendEmoji} ${tradeItem.trend}`,
           tradeItem.updatedAt ? `**Mis à jour :** ${tradeItem.updatedAt}` : '',
         ].filter(Boolean).join('\n'),
