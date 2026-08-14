@@ -81,7 +81,8 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-import fetch from "node-fetch";
+const fetch = require("node-fetch");
+
 
 // ID du salon vocal à mettre à jour
 const VOICE_CHANNEL_ID = "1533815134458347644";
