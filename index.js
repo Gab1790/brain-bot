@@ -1,4 +1,16 @@
 require('dotenv').config();
+
+// --- Mini serveur web pour empêcher Render de mettre le bot en veille ---
+const http = require('http');
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Bot en ligne !');
+}).listen(PORT, () => {
+  console.log(`Serveur keep-alive actif sur le port ${PORT}`);
+});
+// --- Fin du mini serveur web ---
+
 const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
