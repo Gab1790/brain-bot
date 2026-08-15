@@ -50,7 +50,7 @@ client.once('ready', async () => {
       Routes.applicationCommands(client.user.id),
       { body: commandData }
     );
-    console.log('✅ Commandes déployées avec succès sur l\\'API Discord !');
+    console.log("✅ Commandes déployées avec succès sur l'API Discord !");
   } catch (error) {
     console.error('❌ Erreur lors du déploiement des commandes :', error);
   }
