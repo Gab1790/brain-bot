@@ -8,12 +8,12 @@ module.exports = async (interaction) => {
     const ad = db.getAd(adId);
     
     if (!ad) {
-      return interaction.reply({ content: '❌ Cette annonce n\\'existe plus ou est introuvable.', ephemeral: true });
+      return interaction.reply({ content: "❌ Cette annonce n'existe plus ou est introuvable.", ephemeral: true });
     }
     
     // Prevent clicking on own ad
     if (ad.user_id === interaction.user.id) {
-      return interaction.reply({ content: '❌ Tu ne peux pas interagir avec ta propre annonce.', ephemeral: true });
+      return interaction.reply({ content: "❌ Tu ne peux pas interagir avec ta propre annonce.", ephemeral: true });
     }
     
     await interaction.deferReply({ ephemeral: true });
@@ -43,11 +43,11 @@ module.exports = async (interaction) => {
       
       await owner.send(dmContentForOwner);
       
-      await interaction.editReply({ content: '✅ Messages envoyés avec succès aux deux parties ! Vérifie tes messages privés.' });
+      await interaction.editReply({ content: "✅ Messages envoyés avec succès aux deux parties ! Vérifie tes messages privés." });
       
     } catch (err) {
       console.error('Error sending DM:', err);
-      await interaction.editReply({ content: '❌ Impossible d\\'envoyer un message privé. L\\'un des deux utilisateurs a peut-être bloqué les messages privés du bot.' });
+      await interaction.editReply({ content: "❌ Impossible d'envoyer un message privé. L'un des deux utilisateurs a peut-être bloqué les messages privés du bot." });
     }
   }
 };

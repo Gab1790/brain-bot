@@ -14,7 +14,7 @@ module.exports = {
       { name: 'Oui', value: 'Oui' },
       { name: 'Non', value: 'Non' }
     ))
-    .addAttachmentOption(opt => opt.setName('image').setDescription('Image de l\\'objet (Optionnel)'))
+    .addAttachmentOption(opt => opt.setName('image').setDescription("Image de l'objet (Optionnel)"))
     .addStringOption(opt => opt.setName('description').setDescription('Informations supplémentaires (Optionnel)')),
 
   async execute(interaction) {
@@ -22,7 +22,7 @@ module.exports = {
     const config = db.getConfig(guildId);
     
     if (!config.sell_channel) {
-      return interaction.reply({ content: '❌ Le salon de vente n\\'a pas été configuré par un administrateur (`/setup channels`).', ephemeral: true });
+      return interaction.reply({ content: "❌ Le salon de vente n'a pas été configuré par un administrateur (`/setup channels`).", ephemeral: true });
     }
 
     // Check Cooldown
@@ -88,7 +88,7 @@ module.exports = {
       await interaction.editReply({ content: `✅ Ton annonce a été publiée avec succès dans <#${channel.id}> !` });
     } catch (err) {
       console.error(err);
-      await interaction.editReply({ content: '❌ Erreur lors de la publication de l\\'annonce. Vérifiez les permissions du bot dans le salon configuré.' });
+      await interaction.editReply({ content: "❌ Erreur lors de la publication de l'annonce. Vérifiez les permissions du bot dans le salon configuré." });
     }
   }
 };
