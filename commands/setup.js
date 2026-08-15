@@ -42,6 +42,16 @@ module.exports = {
             .addIntegerOption(opt => opt.setName('value').setDescription('Valeur numérique').setRequired(true))
         )
         .addSubcommand(sub =>
+          sub.setName('shop_role')
+            .setDescription('Rôle donnant droit à 1 page supplémentaire dans le shop')
+            .addRoleOption(opt => opt.setName('role').setDescription('Rôle Shop VIP').setRequired(true))
+        )
+        .addSubcommand(sub =>
+          sub.setName('shop_page_size')
+            .setDescription('Nombre de trades par page du shop (ex: 5)')
+            .addIntegerOption(opt => opt.setName('size').setDescription('Taille de la page').setRequired(true).setMinValue(1).setMaxValue(25))
+        )
+        .addSubcommand(sub =>
           sub.setName('reset')
             .setDescription('Réinitialise toute la configuration de ce serveur')
         ),
@@ -57,6 +67,8 @@ module.exports = {
       const ticketCat   = config.ticketCategoryId ? `<#${config.ticketCategoryId}>` : '❌ Non configuré (racine)';
       const logChannel  = config.logChannelId   ? `<#${config.logChannelId}>` : '❌ Non configuré';
       const globalAvg   = config.globalAverage != null ? `${config.globalAverage}` : '❌ Non défini';
+      const shopRole    = config.shopRoleId ? `<@&${config.shopRoleId}>` : '❌ Non configuré';
+      const shopSize    = config.shopPageSize != null ? `${config.shopPageSize}` : '5 (par défaut)';
 
       const embed = new EmbedBuilder()
         .setTitle('⚙️ Configuration du serveur')
@@ -65,7 +77,9 @@ module.exports = {
           { name: '🤝 Rôle Middleman',   value: mmRole,       inline: true },
           { name: '📁 Catégorie tickets',value: ticketCat,    inline: true },
           { name: '📋 Salon de logs',    value: logChannel,   inline: true },
-          { name: '📈 Moyenne globale',  value: globalAvg,    inline: true }
+          { name: '📈 Moyenne globale',  value: globalAvg,    inline: true },
+          { name: '🛍️ Rôle Shop (+1p)',  value: shopRole,     inline: true },
+          { name: '📑 Taille page Shop', value: shopSize,     inline: true }
         )
         .setColor(0x9b59b6)
         .setFooter({ text: 'Utilisez /setup <option> pour modifier la configuration.' });
@@ -108,6 +122,18 @@ module.exports = {
       const value = interaction.options.getInteger('value');
       setGuildConfig(guildId, { globalAverage: value });
       return interaction.reply({ content: `✅ Moyenne P2P globale définie : ${value}`, ephemeral: true });
+    }
+
+    if (sub === 'shop_role') {
+      const role = interaction.options.getRole('role');
+      setGuildConfig(guildId, { shopRoleId: role.id });
+      return interaction.reply({ content: `✅ Rôle Shop VIP défini : ${role}`, ephemeral: true });
+    }
+
+    if (sub === 'shop_page_size') {
+      const size = interaction.options.getInteger('size');
+      setGuildConfig(guildId, { shopPageSize: size });
+      return interaction.reply({ content: `✅ Taille de page du shop définie à : ${size}`, ephemeral: true });
     }
 
     if (sub === 'reset') {

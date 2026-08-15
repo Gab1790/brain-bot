@@ -102,4 +102,25 @@ function parseInfobox(wikitext, pageName) {
   };
 }
 
-module.exports = { searchBrainrots, getBrainrotInfo };
+async function getBrainrotImage(input) {
+  const pageName = await resolveBrainrotName(input);
+  if (!pageName) return null;
+
+  const url = `${BASE}?action=query&titles=${encodeURIComponent(pageName)}&prop=pageimages&format=json&pithumbsize=500`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json.query && json.query.pages) {
+      const pages = Object.values(json.query.pages);
+      if (pages.length > 0 && pages[0].thumbnail) {
+        return pages[0].thumbnail.source;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { searchBrainrots, getBrainrotInfo, getBrainrotImage };

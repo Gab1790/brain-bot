@@ -97,6 +97,105 @@ module.exports = async function handleButton(interaction) {
     return closeTicketChannel(interaction);
   }
 
+  // --- SHOP BUTTONS ---
+  const shopMatch = interaction.customId.match(/^(shop_val|shop_dm|shop_rep)_(.+)$/);
+  if (shopMatch) {
+    const action = shopMatch[1];
+    const offerId = shopMatch[2];
+    
+    // Find the offer in shopDb
+    const { getAllShops, removeOfferById } = require('../utils/shopDb');
+    const allShops = getAllShops();
+    let offer = null;
+    let authorId = null;
+    let guildId = interaction.guildId;
+    
+    // Search for the offer by ID
+    for (const gid in allShops) {
+      for (const uid in allShops[gid]) {
+        for (const slot in allShops[gid][uid]) {
+          if (allShops[gid][uid][slot] && allShops[gid][uid][slot].id === offerId) {
+            offer = allShops[gid][uid][slot];
+            authorId = uid;
+            guildId = gid;
+            break;
+          }
+        }
+        if (offer) break;
+      }
+      if (offer) break;
+    }
+
+    if (!offer) {
+      return interaction.reply({ content: '❌ Cette offre de shop n\'existe plus.', ephemeral: true });
+    }
+
+    if (action === 'shop_val') {
+      if (interaction.user.id === authorId) {
+        return interaction.reply({ content: '❌ Tu ne peux pas accepter ta propre offre.', ephemeral: true });
+      }
+
+      // Send DM to author
+      try {
+        const authorUser = await interaction.client.users.fetch(authorId);
+        await authorUser.send(`🎉 Bonne nouvelle ! **${interaction.user.tag}** a validé ton offre dans le shop (donne: ${offer.give} ➔ demande: ${offer.receive}). Contacte-le pour procéder à l'échange !`);
+      } catch (e) {
+        console.error('Failed to notify shop offer author', e);
+      }
+      
+      // Delete from shop
+      removeOfferById(offerId);
+
+      // Update message
+      const msg = interaction.message;
+      if (msg) {
+        const { EmbedBuilder } = require('discord.js');
+        const embed = EmbedBuilder.from(msg.embeds[0]).setColor(0x95a5a6).setDescription('✅ *Offre conclue et retirée du shop.*');
+        await msg.edit({ embeds: [embed], components: [] }).catch(() => {});
+      }
+
+      return interaction.reply({ content: '✅ Le vendeur a été notifié et l\'offre a été retirée du shop. Pense à le contacter en MP ou en jeu.', ephemeral: true });
+    }
+
+    if (action === 'shop_dm') {
+      const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+      const modal = new ModalBuilder()
+        .setCustomId(`shop_dm_modal_${offerId}`)
+        .setTitle(`Contacter le vendeur`);
+
+      const input = new TextInputBuilder()
+        .setCustomId('message_text')
+        .setLabel('Ton message')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true)
+        .setPlaceholder('Bonjour, je suis intéressé par ton offre...');
+
+      const { ActionRowBuilder } = require('discord.js');
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+
+      return interaction.showModal(modal);
+    }
+
+    if (action === 'shop_rep') {
+      const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+      const modal = new ModalBuilder()
+        .setCustomId(`shop_rep_modal_${offerId}`)
+        .setTitle(`Signaler l'offre`);
+
+      const input = new TextInputBuilder()
+        .setCustomId('reason_text')
+        .setLabel('Raison du signalement')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true)
+        .setPlaceholder('Ex: arnaque, valeur irréaliste...');
+
+      const { ActionRowBuilder } = require('discord.js');
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+
+      return interaction.showModal(modal);
+    }
+  }
+
   // MM confirm/reject buttons: confirm_trade_<tradeId>, reject_trade_<tradeId>
   const mmConfirmMatch = interaction.customId.match(/^(confirm_trade|reject_trade)_(trade_\d+)$/);
   if (mmConfirmMatch) {

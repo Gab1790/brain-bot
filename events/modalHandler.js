@@ -1,7 +1,76 @@
 const { ModalSubmitInteraction } = require('discord.js');
 const { readData, writeData } = require('../utils/db');
 
-module.exports = async function handleModal(interaction) {
+  module.exports = async function handleModal(interaction) {
+    // --- SHOP MODALS ---
+    const shopModalMatch = interaction.customId.match(/^(shop_dm_modal|shop_rep_modal)_(.+)$/);
+    if (shopModalMatch) {
+      const modalType = shopModalMatch[1];
+      const offerId = shopModalMatch[2];
+
+      const { getAllShops } = require('../utils/shopDb');
+      const allShops = getAllShops();
+      let offer = null;
+      let authorId = null;
+
+      for (const gid in allShops) {
+        for (const uid in allShops[gid]) {
+          for (const slot in allShops[gid][uid]) {
+            if (allShops[gid][uid][slot] && allShops[gid][uid][slot].id === offerId) {
+              offer = allShops[gid][uid][slot];
+              authorId = uid;
+              break;
+            }
+          }
+          if (offer) break;
+        }
+        if (offer) break;
+      }
+
+      if (!offer) {
+        return interaction.reply({ content: '❌ Cette offre n\'existe plus.', ephemeral: true });
+      }
+
+      if (modalType === 'shop_dm_modal') {
+        const msgText = interaction.fields.getTextInputValue('message_text');
+        try {
+          const authorUser = await interaction.client.users.fetch(authorId);
+          await authorUser.send(`✉️ **Message de ${interaction.user.tag}** concernant ton offre dans le shop (donne: ${offer.give} ➔ demande: ${offer.receive}):\n\n${msgText}`);
+          return interaction.reply({ content: '✅ Ton message a bien été envoyé au vendeur en MP.', ephemeral: true });
+        } catch (e) {
+          return interaction.reply({ content: '❌ Impossible d\'envoyer le message. Le vendeur a peut-être bloqué les DMs.', ephemeral: true });
+        }
+      }
+
+      if (modalType === 'shop_rep_modal') {
+        const reason = interaction.fields.getTextInputValue('reason_text');
+        const cfg = require('../utils/guildConfig').getGuildConfig(interaction.guildId);
+        if (cfg && cfg.logChannelId) {
+          try {
+            const logCh = await interaction.client.channels.fetch(cfg.logChannelId);
+            if (logCh) {
+              const { EmbedBuilder } = require('discord.js');
+              const embed = new EmbedBuilder()
+                .setTitle('🚩 Signalement d\'une offre du Shop')
+                .setDescription(`**Offre ID :** ${offer.id}\n**Vendeur :** <@${authorId}>\n**Signalé par :** ${interaction.user} (${interaction.user.tag})`)
+                .addFields(
+                  { name: 'Détails de l\'offre', value: `Donne: ${offer.give}\nDemande: ${offer.receive}` },
+                  { name: 'Raison', value: reason }
+                )
+                .setColor(0xe74c3c)
+                .setTimestamp();
+              
+              await logCh.send({ embeds: [embed] });
+              return interaction.reply({ content: '✅ Le signalement a été envoyé à l\'équipe de modération.', ephemeral: true });
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        return interaction.reply({ content: '✅ Signalement enregistré, mais aucun salon de logs n\'est configuré.', ephemeral: true });
+      }
+    }
+
     // Handle message modal and proof modal
     // message modal: message_modal_trade_<id>
     // proof modal: proof_modal_trade_<id>

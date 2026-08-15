@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getSheetValues, getGlobalAverage, getDynamicItemValue } = require('../utils/sheetValues');
+const { getSheetValues, getDynamicItemValue } = require('../utils/sheetValues');
 const { searchBrainrots, getBrainrotInfo } = require('../utils/fandomApi');
 const { getGuildConfig } = require('../utils/guildConfig');
 
@@ -74,7 +74,6 @@ module.exports = {
       .setFooter({ text: 'Sources : base locale (trade) + Wiki Fandom (stats)' });
 
     // ── Trade value (local values) ──────────────────────────────────────
-    const globalAvg = getGlobalAverage(guildId);
     if (tradeItem) {
       const dynamicVal = getDynamicItemValue(itemName, guildId);
       const trendEmoji = TREND_EMOJI[tradeItem.trend] || '➖';
@@ -95,9 +94,6 @@ module.exports = {
         inline: true,
       });
     }
-
-    // Show global average reference
-    embed.addFields({ name: '📈 Moyenne P2P globale', value: `${globalAvg.toLocaleString('fr-FR')} (référence)`, inline: true });
 
     // ── Game stats (Fandom wiki) ────────────────────────────────────────
     if (stats) {
