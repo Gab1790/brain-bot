@@ -1,147 +1,95 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
-const { getGuildConfig, setGuildConfig } = require('../utils/guildConfig');
-const { invalidateCache } = require('../utils/sheetValues');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const db = require('../utils/db');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setup')
-    .setDescription('[Admin] Configure le bot pour ce serveur')
+    .setDescription('Afficher ou modifier la configuration du bot')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addSubcommand(sub =>
-      sub.setName('voir')
-        .setDescription('Affiche la configuration actuelle du serveur')
-    )
-    .addSubcommand(sub =>
-      sub.setName('staff_role')
-        .setDescription('Définit le rôle Staff qui peut modifier les valeurs et la blacklist')
-        .addRoleOption(opt => opt.setName('role').setDescription('Rôle Staff').setRequired(true))
-    )
-    .addSubcommand(sub =>
-      sub.setName('middleman_role')
-        .setDescription('Définit le rôle Middleman')
-        .addRoleOption(opt => opt.setName('role').setDescription('Rôle Middleman').setRequired(true))
-    )
-    .addSubcommand(sub =>
-      sub.setName('ticket_category')
-        .setDescription('Définit la catégorie où seront créés les tickets')
-        .addChannelOption(opt => opt.setName('categorie').setDescription('Catégorie Discord').setRequired(true))
-    )
-    .addSubcommand(sub =>
-      sub.setName('log_channel')
-        .setDescription('Définit le salon de logs des tickets fermés')
-        .addChannelOption(opt => opt.setName('salon').setDescription('Salon de logs').setRequired(true))
-    )
-    .addSubcommand(sub =>
-          sub.setName('notify_channel')
-            .setDescription('Définit le salon où poster automatiquement les nouvelles offres')
-            .addChannelOption(opt => opt.setName('salon').setDescription('Salon de notifications').setRequired(true))
-        )
-        .addSubcommand(sub =>
-          sub.setName('set_global_average')
-            .setDescription('Définit la moyenne P2P globale manuellement')
-            .addIntegerOption(opt => opt.setName('value').setDescription('Valeur numérique').setRequired(true))
-        )
-        .addSubcommand(sub =>
-          sub.setName('shop_role')
-            .setDescription('Rôle donnant droit à 1 page supplémentaire dans le shop')
-            .addRoleOption(opt => opt.setName('role').setDescription('Rôle Shop VIP').setRequired(true))
-        )
-        .addSubcommand(sub =>
-          sub.setName('shop_page_size')
-            .setDescription('Nombre de trades par page du shop (ex: 5)')
-            .addIntegerOption(opt => opt.setName('size').setDescription('Taille de la page').setRequired(true).setMinValue(1).setMaxValue(25))
-        )
-        .addSubcommand(sub =>
-          sub.setName('reset')
-            .setDescription('Réinitialise toute la configuration de ce serveur')
-        ),
+    .addChannelOption(opt => opt.setName('sell_channel').setDescription('Définir le salon des annonces /selling'))
+    .addChannelOption(opt => opt.setName('buy_channel').setDescription('Définir le salon des annonces /buying'))
+    .addIntegerOption(opt => opt.setName('sell_cooldown').setDescription('Temps d\\'attente pour /selling (minutes)'))
+    .addIntegerOption(opt => opt.setName('buy_cooldown').setDescription('Temps d\\'attente pour /buying (minutes)'))
+    .addRoleOption(opt => opt.setName('add_bypass_role').setDescription('Ajouter un rôle ignorant les cooldowns'))
+    .addRoleOption(opt => opt.setName('remove_bypass_role').setDescription('Retirer un rôle ignorant les cooldowns'))
+    .addRoleOption(opt => opt.setName('add_mm_role').setDescription('Ajouter un rôle Middleman'))
+    .addRoleOption(opt => opt.setName('remove_mm_role').setDescription('Retirer un rôle Middleman'))
+    .addStringOption(opt => opt.setName('color').setDescription('Changer la couleur des embeds (HEX, ex: #ff0000)')),
 
   async execute(interaction) {
-    const guildId = interaction.guildId;
-    const sub = interaction.options.getSubcommand();
+    const guildId = interaction.guild.id;
+    const config = db.getConfig(guildId);
+    let updated = false;
 
-    if (sub === 'voir') {
-      const config = getGuildConfig(guildId);
-      const staffRole   = config.staffRoleId    ? `<@&${config.staffRoleId}>` : '❌ Non configuré';
-      const mmRole      = config.middlemanRoleId ? `<@&${config.middlemanRoleId}>` : '❌ Non configuré';
-      const ticketCat   = config.ticketCategoryId ? `<#${config.ticketCategoryId}>` : '❌ Non configuré (racine)';
-      const logChannel  = config.logChannelId   ? `<#${config.logChannelId}>` : '❌ Non configuré';
-      const globalAvg   = config.globalAverage != null ? `${config.globalAverage}` : '❌ Non défini';
-      const shopRole    = config.shopRoleId ? `<@&${config.shopRoleId}>` : '❌ Non configuré';
-      const shopSize    = config.shopPageSize != null ? `${config.shopPageSize}` : '5 (par défaut)';
+    // Update settings if provided
+    const sellChannel = interaction.options.getChannel('sell_channel');
+    if (sellChannel) { config.sell_channel = sellChannel.id; updated = true; }
 
-      const embed = new EmbedBuilder()
-        .setTitle('⚙️ Configuration du serveur')
-        .addFields(
-          { name: '🛡️ Rôle Staff',      value: staffRole,    inline: true },
-          { name: '🤝 Rôle Middleman',   value: mmRole,       inline: true },
-          { name: '📁 Catégorie tickets',value: ticketCat,    inline: true },
-          { name: '📋 Salon de logs',    value: logChannel,   inline: true },
-          { name: '📈 Moyenne globale',  value: globalAvg,    inline: true },
-          { name: '🛍️ Rôle Shop (+1p)',  value: shopRole,     inline: true },
-          { name: '📑 Taille page Shop', value: shopSize,     inline: true }
-        )
-        .setColor(0x9b59b6)
-        .setFooter({ text: 'Utilisez /setup <option> pour modifier la configuration.' });
+    const buyChannel = interaction.options.getChannel('buy_channel');
+    if (buyChannel) { config.buy_channel = buyChannel.id; updated = true; }
 
-      return interaction.reply({ embeds: [embed], ephemeral: true });
+    const sellCooldown = interaction.options.getInteger('sell_cooldown');
+    if (sellCooldown !== null) { config.sell_cooldown = sellCooldown; updated = true; }
+
+    const buyCooldown = interaction.options.getInteger('buy_cooldown');
+    if (buyCooldown !== null) { config.buy_cooldown = buyCooldown; updated = true; }
+
+    const addBypass = interaction.options.getRole('add_bypass_role');
+    if (addBypass && !config.bypass_roles.includes(addBypass.id)) {
+      config.bypass_roles.push(addBypass.id);
+      updated = true;
     }
 
-    if (sub === 'staff_role') {
-      const role = interaction.options.getRole('role');
-      setGuildConfig(guildId, { staffRoleId: role.id });
-      return interaction.reply({ content: `✅ Rôle Staff défini : ${role}`, ephemeral: true });
+    const removeBypass = interaction.options.getRole('remove_bypass_role');
+    if (removeBypass && config.bypass_roles.includes(removeBypass.id)) {
+      config.bypass_roles = config.bypass_roles.filter(id => id !== removeBypass.id);
+      updated = true;
     }
 
-    if (sub === 'middleman_role') {
-      const role = interaction.options.getRole('role');
-      setGuildConfig(guildId, { middlemanRoleId: role.id });
-      return interaction.reply({ content: `✅ Rôle Middleman défini : ${role}`, ephemeral: true });
+    const addMm = interaction.options.getRole('add_mm_role');
+    if (addMm && !config.mm_roles.includes(addMm.id)) {
+      config.mm_roles.push(addMm.id);
+      updated = true;
     }
 
-    if (sub === 'ticket_category') {
-      const channel = interaction.options.getChannel('categorie');
-      setGuildConfig(guildId, { ticketCategoryId: channel.id });
-      return interaction.reply({ content: `✅ Catégorie de tickets définie : ${channel}`, ephemeral: true });
+    const removeMm = interaction.options.getRole('remove_mm_role');
+    if (removeMm && config.mm_roles.includes(removeMm.id)) {
+      config.mm_roles = config.mm_roles.filter(id => id !== removeMm.id);
+      updated = true;
     }
 
-    if (sub === 'log_channel') {
-      const channel = interaction.options.getChannel('salon');
-      setGuildConfig(guildId, { logChannelId: channel.id });
-      return interaction.reply({ content: `✅ Salon de logs défini : ${channel}`, ephemeral: true });
+    const color = interaction.options.getString('color');
+    if (color) {
+      if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
+        config.embed_color = color;
+        updated = true;
+      } else {
+        return interaction.reply({ content: '❌ Couleur invalide. Utilisez un format HEX (ex: #ff0000)', ephemeral: true });
+      }
     }
 
-    if (sub === 'notify_channel') {
-      const channel = interaction.options.getChannel('salon');
-      setGuildConfig(guildId, { notifyChannelId: channel.id });
-      return interaction.reply({ content: `✅ Salon de notifications défini : ${channel}`, ephemeral: true });
+    // Save if changed
+    if (updated) {
+      db.saveConfig(guildId, config);
     }
 
+    // Format roles list
+    const bypassList = config.bypass_roles.length > 0 ? config.bypass_roles.map(id => `<@&${id}>`).join(', ') : 'Aucun';
+    const mmList = config.mm_roles.length > 0 ? config.mm_roles.map(id => `<@&${id}>`).join(', ') : 'Aucun';
 
-    if (sub === 'set_global_average') {
-      const value = interaction.options.getInteger('value');
-      setGuildConfig(guildId, { globalAverage: value });
-      return interaction.reply({ content: `✅ Moyenne P2P globale définie : ${value}`, ephemeral: true });
-    }
+    // Build the configuration embed
+    const embed = new EmbedBuilder()
+      .setTitle('⚙️ Configuration du Bot')
+      .setColor(config.embed_color)
+      .setDescription('Voici la configuration actuelle. Utilisez les options de la commande `/setup` pour modifier ces valeurs.')
+      .addFields(
+        { name: '📢 Salons', value: `**Vente (/selling) :** ${config.sell_channel ? `<#${config.sell_channel}>` : 'Non défini'}\n**Achat (/buying) :** ${config.buy_channel ? `<#${config.buy_channel}>` : 'Non défini'}` },
+        { name: '⏳ Cooldowns', value: `**Vente :** ${config.sell_cooldown} minute(s)\n**Achat :** ${config.buy_cooldown} minute(s)` },
+        { name: '🛡️ Rôles', value: `**Ignorer le cooldown :** ${bypassList}\n**Middleman :** ${mmList}` },
+        { name: '🎨 Apparence', value: `**Couleur Embed :** ${config.embed_color}` }
+      )
+      .setTimestamp();
 
-    if (sub === 'shop_role') {
-      const role = interaction.options.getRole('role');
-      setGuildConfig(guildId, { shopRoleId: role.id });
-      return interaction.reply({ content: `✅ Rôle Shop VIP défini : ${role}`, ephemeral: true });
-    }
-
-    if (sub === 'shop_page_size') {
-      const size = interaction.options.getInteger('size');
-      setGuildConfig(guildId, { shopPageSize: size });
-      return interaction.reply({ content: `✅ Taille de page du shop définie à : ${size}`, ephemeral: true });
-    }
-
-    if (sub === 'reset') {
-      const { readData, writeData } = require('../utils/db');
-      const all = readData('guild_configs.json', {});
-      delete all[guildId];
-      writeData('guild_configs.json', all);
-      return interaction.reply({ content: '🔄 Configuration du serveur réinitialisée.', ephemeral: true });
-    }
+    await interaction.reply({ embeds: [embed], ephemeral: true });
   }
 };

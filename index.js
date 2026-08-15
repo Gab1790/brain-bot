@@ -15,6 +15,10 @@ const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const handleButton = require('./events/buttonHandler');
+const db = require('./utils/db');
+
+// Initialiser la DB
+db.getDb();
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
@@ -32,14 +36,6 @@ for (const file of commandFiles) {
 
 client.once('ready', () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
-  // Run expiration job at startup and every 6 hours
-  try {
-    const { expireTrades } = require('./utils/expireTrades');
-    expireTrades(client, 7).catch(() => {});
-    setInterval(() => expireTrades(client, 7).catch(() => {}), 6 * 60 * 60 * 1000);
-  } catch (e) {
-    console.error('expireTrades not available', e);
-  }
 });
 
 client.on('interactionCreate', async interaction => {
@@ -51,24 +47,11 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
-    if (interaction.isAutocomplete()) {
-      const command = client.commands.get(interaction.commandName);
-      if (!command || !command.autocomplete) return;
-      await command.autocomplete(interaction);
-      return;
-    }
-
     if (interaction.isButton()) {
       await handleButton(interaction);
       return;
     }
-
-      if (interaction.isModalSubmit && interaction.customId && interaction.customId.startsWith('message_modal_')) {
-        const handleModal = require('./events/modalHandler');
-        await handleModal(interaction);
-        return;
-      }
-    } catch (err) {
+  } catch (err) {
     console.error(err);
     if (interaction.isRepliable()) {
       const payload = { content: "❌ Une erreur est survenue.", ephemeral: true };
@@ -82,7 +65,6 @@ client.on('interactionCreate', async interaction => {
 });
 
 const fetch = require("node-fetch");
-
 
 // ID du salon vocal à mettre à jour
 const VOICE_CHANNEL_ID = "1533815134458347644";
@@ -112,13 +94,10 @@ async function updateYoutubeStats(client) {
 // Mise à jour toutes les 5 minutes
 client.once("ready", () => {
   console.log("Mise à jour YouTube activée");
-
   updateYoutubeStats(client); // première mise à jour
-
   setInterval(() => {
     updateYoutubeStats(client);
   }, 5 * 60 * 1000);
 });
-
 
 client.login(process.env.DISCORD_TOKEN);
