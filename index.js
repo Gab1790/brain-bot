@@ -34,8 +34,26 @@ for (const file of commandFiles) {
   client.commands.set(command.data.name, command);
 }
 
-client.once('ready', () => {
+const { REST, Routes } = require('discord.js');
+
+client.once('ready', async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
+  
+  // -- Déploiement Automatique des Commandes --
+  try {
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    const commandData = client.commands.map(cmd => cmd.data.toJSON());
+    
+    console.log(`🔄 Déploiement automatique de ${commandData.length} commande(s)...`);
+    
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: commandData }
+    );
+    console.log('✅ Commandes déployées avec succès sur l\\'API Discord !');
+  } catch (error) {
+    console.error('❌ Erreur lors du déploiement des commandes :', error);
+  }
 });
 
 client.on('interactionCreate', async interaction => {
