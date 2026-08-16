@@ -85,7 +85,7 @@ client.on('interactionCreate', async interaction => {
 const fetch = require("node-fetch");
 
 // ID du salon vocal à mettre à jour
-const VOICE_CHANNEL_ID = "1533815134458347644";
+const VOICE_CHANNEL_ID = "1538549668978622606";
 
 // URL de ton API Render
 const API_URL = "https://youtube-api-e8op.onrender.com/";
