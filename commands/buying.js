@@ -20,7 +20,7 @@ module.exports = {
   async execute(interaction) {
     const guildId = interaction.guild.id;
     const config = db.getConfig(guildId);
-    
+
     if (!config.buy_channel) {
       return interaction.reply({ content: "❌ Le salon d'achat n'a pas été configuré par un administrateur (`/setup channels`).", ephemeral: true });
     }
@@ -28,7 +28,7 @@ module.exports = {
     // Check Cooldown
     const memberRoles = interaction.member.roles.cache.map(r => r.id);
     const cooldownStatus = db.checkCooldown(interaction.user.id, 'BUYING', config.buy_cooldown, memberRoles, config.bypass_roles);
-    
+
     if (cooldownStatus.onCooldown) {
       const remainingMin = Math.ceil(cooldownStatus.remaining / 60000);
       return interaction.reply({ content: `⏳ Tu dois attendre encore **${remainingMin} minute(s)** avant de pouvoir publier une nouvelle annonce.`, ephemeral: true });
@@ -38,11 +38,12 @@ module.exports = {
 
     const adId = db.generateAdId('BUY');
     const image = interaction.options.getAttachment('image');
-    
+
     const adData = {
       id: adId,
       type: 'BUY',
       user_id: interaction.user.id,
+      guild_id: guildId,
       item_name: interaction.options.getString('nom'),
       quantity: interaction.options.getInteger('quantite'),
       min_price: interaction.options.getString('prix_min'),
@@ -80,7 +81,7 @@ module.exports = {
     try {
       const channel = await interaction.guild.channels.fetch(config.buy_channel);
       const message = await channel.send({ embeds: [embed], components: [row] });
-      
+
       adData.message_id = message.id;
       adData.channel_id = channel.id;
       db.createAd(adData);

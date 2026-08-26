@@ -17,7 +17,7 @@ function getDb() {
   if (dbInstance) return dbInstance;
   ensureDataDir();
   dbInstance = new DatabaseSync(DB_PATH);
-  
+
   // Create tables
   dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS config (
@@ -30,11 +30,12 @@ function getDb() {
       mm_roles TEXT DEFAULT '[]',
       embed_color TEXT DEFAULT '#3498db'
     );
-    
+
     CREATE TABLE IF NOT EXISTS ads (
       id TEXT PRIMARY KEY,
       type TEXT NOT NULL,
       user_id TEXT NOT NULL,
+      guild_id TEXT,
       message_id TEXT,
       channel_id TEXT,
       item_name TEXT NOT NULL,
@@ -47,7 +48,7 @@ function getDb() {
       image_url TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
-    
+
     CREATE TABLE IF NOT EXISTS cooldowns (
       user_id TEXT,
       command_type TEXT,
@@ -55,7 +56,14 @@ function getDb() {
       PRIMARY KEY (user_id, command_type)
     );
   `);
-  
+
+  // Migration douce pour les bases existantes créées avant l'ajout de guild_id
+  try {
+    dbInstance.exec(`ALTER TABLE ads ADD COLUMN guild_id TEXT`);
+  } catch (err) {
+    // La colonne existe déjà : on ignore l'erreur "duplicate column name"
+  }
+
   return dbInstance;
 }
 
@@ -122,13 +130,14 @@ function generateAdId(type) {
 function createAd(data) {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO ads (id, type, user_id, message_id, channel_id, item_name, quantity, min_price, max_price, payment, middleman, description, image_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO ads (id, type, user_id, guild_id, message_id, channel_id, item_name, quantity, min_price, max_price, payment, middleman, description, image_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   stmt.run(
     data.id,
     data.type,
     data.user_id,
+    data.guild_id || null,
     data.message_id || null,
     data.channel_id || null,
     data.item_name,
@@ -154,6 +163,17 @@ function getAd(id) {
   return stmt.get(id);
 }
 
+// Récupère les offres les plus récentes d'un serveur, avec filtre type optionnel
+function getRecentAds(guildId, type = 'ALL', limit = 10) {
+  const db = getDb();
+  if (type === 'ALL') {
+    const stmt = db.prepare('SELECT * FROM ads WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?');
+    return stmt.all(guildId, limit);
+  }
+  const stmt = db.prepare('SELECT * FROM ads WHERE guild_id = ? AND type = ? ORDER BY created_at DESC LIMIT ?');
+  return stmt.all(guildId, type, limit);
+}
+
 // Cooldown functions
 function checkCooldown(userId, commandType, durationMinutes, memberRoles, bypassRoles) {
   // Check bypass
@@ -166,14 +186,14 @@ function checkCooldown(userId, commandType, durationMinutes, memberRoles, bypass
   const db = getDb();
   const stmt = db.prepare('SELECT expires_at FROM cooldowns WHERE user_id = ? AND command_type = ?');
   const row = stmt.get(userId, commandType);
-  
+
   const now = Date.now();
-  
+
   if (row && row.expires_at > now) {
     const remainingMs = row.expires_at - now;
     return { onCooldown: true, remaining: remainingMs };
   }
-  
+
   // Set new cooldown
   const expiresAt = now + (durationMinutes * 60 * 1000);
   const insertStmt = db.prepare(`
@@ -182,7 +202,7 @@ function checkCooldown(userId, commandType, durationMinutes, memberRoles, bypass
     ON CONFLICT(user_id, command_type) DO UPDATE SET expires_at = excluded.expires_at
   `);
   insertStmt.run(userId, commandType, expiresAt);
-  
+
   return { onCooldown: false };
 }
 
@@ -194,5 +214,6 @@ module.exports = {
   createAd,
   updateAdMessage,
   getAd,
+  getRecentAds,
   checkCooldown
 };
