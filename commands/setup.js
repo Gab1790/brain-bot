@@ -14,6 +14,8 @@ module.exports = {
     .addRoleOption(opt => opt.setName('remove_bypass_role').setDescription('Retirer un rôle ignorant les cooldowns'))
     .addRoleOption(opt => opt.setName('add_mm_role').setDescription('Ajouter un rôle Middleman'))
     .addRoleOption(opt => opt.setName('remove_mm_role').setDescription('Retirer un rôle Middleman'))
+    .addRoleOption(opt => opt.setName('add_staff_role').setDescription("Ajouter un rôle autorisé à utiliser /boost"))
+    .addRoleOption(opt => opt.setName('remove_staff_role').setDescription("Retirer un rôle autorisé à utiliser /boost"))
     .addStringOption(opt => opt.setName('color').setDescription('Changer la couleur des embeds (HEX, ex: #ff0000)')),
 
   async execute(interaction) {
@@ -58,6 +60,18 @@ module.exports = {
       updated = true;
     }
 
+    const addStaff = interaction.options.getRole('add_staff_role');
+    if (addStaff && !config.staff_roles.includes(addStaff.id)) {
+      config.staff_roles.push(addStaff.id);
+      updated = true;
+    }
+
+    const removeStaff = interaction.options.getRole('remove_staff_role');
+    if (removeStaff && config.staff_roles.includes(removeStaff.id)) {
+      config.staff_roles = config.staff_roles.filter(id => id !== removeStaff.id);
+      updated = true;
+    }
+
     const color = interaction.options.getString('color');
     if (color) {
       if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
@@ -76,6 +90,7 @@ module.exports = {
     // Format roles list
     const bypassList = config.bypass_roles.length > 0 ? config.bypass_roles.map(id => `<@&${id}>`).join(', ') : 'Aucun';
     const mmList = config.mm_roles.length > 0 ? config.mm_roles.map(id => `<@&${id}>`).join(', ') : 'Aucun';
+    const staffList = config.staff_roles.length > 0 ? config.staff_roles.map(id => `<@&${id}>`).join(', ') : 'Aucun';
 
     // Build the configuration embed
     const embed = new EmbedBuilder()
@@ -85,7 +100,7 @@ module.exports = {
       .addFields(
         { name: '📢 Salons', value: `**Vente (/selling) :** ${config.sell_channel ? `<#${config.sell_channel}>` : 'Non défini'}\n**Achat (/buying) :** ${config.buy_channel ? `<#${config.buy_channel}>` : 'Non défini'}` },
         { name: '⏳ Cooldowns', value: `**Vente :** ${config.sell_cooldown} minute(s)\n**Achat :** ${config.buy_cooldown} minute(s)` },
-        { name: '🛡️ Rôles', value: `**Ignorer le cooldown :** ${bypassList}\n**Middleman :** ${mmList}` },
+        { name: '🛡️ Rôles', value: `**Ignorer le cooldown :** ${bypassList}\n**Middleman :** ${mmList}\n**Staff (/boost) :** ${staffList}` },
         { name: '🎨 Apparence', value: `**Couleur Embed :** ${config.embed_color}` }
       )
       .setTimestamp();

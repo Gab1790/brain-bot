@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const db = require('../utils/db');
+const { getBrainrotImageUrl } = require('../utils/fandomImage');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -27,8 +28,7 @@ module.exports = {
 
     // Check Cooldown
     const memberRoles = interaction.member.roles.cache.map(r => r.id);
-    const cooldownStatus = db.checkCooldown(interaction.user.id, 'BUYING', config.buy_cooldown, memberRoles, config.bypass_roles);
-
+    const cooldownStatus = db.checkCooldown(guildId, interaction.user.id, 'BUYING', config.buy_cooldown, memberRoles, config.bypass_roles); // ← guildId ajouté en 1er argument
     if (cooldownStatus.onCooldown) {
       const remainingMin = Math.ceil(cooldownStatus.remaining / 60000);
       return interaction.reply({ content: `⏳ Tu dois attendre encore **${remainingMin} minute(s)** avant de pouvoir publier une nouvelle annonce.`, ephemeral: true });
@@ -36,7 +36,7 @@ module.exports = {
 
     await interaction.deferReply({ ephemeral: true });
 
-    const adId = db.generateAdId('BUY');
+    const adId = db.generateAdId('BUY', guildId);
     const image = interaction.options.getAttachment('image');
 
     const adData = {
@@ -54,6 +54,12 @@ module.exports = {
       image_url: image ? image.url : null
     };
 
+    // Si aucune image fournie par l'utilisateur, on cherche l'image du Brainrot sur le wiki Fandom
+    let fandomThumbnailUrl = null;
+    if (!adData.image_url) {
+      fandomThumbnailUrl = await getBrainrotImageUrl(adData.item_name);
+    }
+
     const embed = new EmbedBuilder()
       .setTitle('🔎 RECHERCHE')
       .setColor(config.embed_color)
@@ -66,6 +72,8 @@ module.exports = {
     }
     if (adData.image_url) {
       embed.setImage(adData.image_url);
+    } else if (fandomThumbnailUrl) {
+      embed.setThumbnail(fandomThumbnailUrl);
     }
     if (interaction.user.displayAvatarURL()) {
       embed.setAuthor({ name: interaction.user.username, iconURL: interaction.user.displayAvatarURL() });

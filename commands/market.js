@@ -40,6 +40,7 @@ module.exports = {
 
         ads.forEach((ad, index) => {
             const typeIcon = ad.type === 'SELL' ? '🛒 Vente' : '🔎 Recherche';
+            const boostBadge = db.isAdBoosted(ad) ? '⭐ ' : '';
             const value =
                 `📦 **Quantité :** ${ad.quantity}\n` +
                 `💰 **Prix :** ${ad.min_price} - ${ad.max_price}\n` +
@@ -49,7 +50,7 @@ module.exports = {
                 `🆔 \`${ad.id}\``;
 
             embed.addFields({
-                name: `${index + 1}. ${typeIcon} — ${ad.item_name}`,
+                name: `${index + 1}. ${boostBadge}${typeIcon} — ${ad.item_name}`,
                 value,
                 inline: false
             });

@@ -38,14 +38,14 @@ const { REST, Routes } = require('discord.js');
 
 client.once('ready', async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
-  
+
   // -- Déploiement Automatique des Commandes --
   try {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     const commandData = client.commands.map(cmd => cmd.data.toJSON());
-    
+
     console.log(`🔄 Déploiement automatique de ${commandData.length} commande(s)...`);
-    
+
     await rest.put(
       Routes.applicationCommands(client.user.id),
       { body: commandData }
@@ -74,11 +74,35 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isRepliable()) {
       const payload = { content: "❌ Une erreur est survenue.", ephemeral: true };
       if (interaction.replied || interaction.deferred) {
-        await interaction.followUp(payload).catch(() => {});
+        await interaction.followUp(payload).catch(() => { });
       } else {
-        await interaction.reply(payload).catch(() => {});
+        await interaction.reply(payload).catch(() => { });
       }
     }
+  }
+});
+
+client.on('guildCreate', async (guild) => {
+  console.log(`➕ Bot ajouté au serveur : ${guild.name} (${guild.id})`);
+  try {
+    const target = guild.systemChannel
+      || guild.channels.cache.find(ch => ch.type === 0 && ch.permissionsFor(guild.members.me)?.has('SendMessages'));
+    if (!target) return;
+
+    const { EmbedBuilder } = require('discord.js');
+    const embed = new EmbedBuilder()
+      .setTitle("👋 Merci d'avoir ajouté Brain-Bot !")
+      .setColor('#3498db')
+      .setDescription(
+        'Pour commencer, un administrateur doit configurer les salons avec `/setup` :\n\n' +
+        '`/setup sell_channel:#votre-salon buy_channel:#votre-salon`\n\n' +
+        'Ensuite, les membres peuvent utiliser `/selling`, `/buying` et `/market`.'
+      )
+      .setFooter({ text: 'Tape /help pour voir toutes les commandes.' });
+
+    await target.send({ embeds: [embed] }).catch(() => { });
+  } catch (err) {
+    console.error('Erreur message de bienvenue guildCreate:', err.message);
   }
 });
 

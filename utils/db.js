@@ -7,10 +7,31 @@ const DATA_DIR = process.env.BRAINBOT_DATA_DIR
   : path.join(__dirname, '..', 'data');
 const DB_PATH = path.join(DATA_DIR, 'brainbot.sqlite');
 
+const BOOST_DURATION_HOURS = 24;
+
 let dbInstance = null;
 
 function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function ensureCooldownsSchema() {
+  const cols = dbInstance.prepare("PRAGMA table_info(cooldowns)").all();
+  const hasGuildId = cols.some(c => c.name === 'guild_id');
+  if (!hasGuildId) {
+    // Les cooldowns sont des données transitoires (non critiques) :
+    // on peut recréer la table sans risque pour passer au schéma multi-serveur.
+    dbInstance.exec('DROP TABLE IF EXISTS cooldowns');
+    dbInstance.exec(`
+      CREATE TABLE cooldowns (
+        guild_id TEXT,
+        user_id TEXT,
+        command_type TEXT,
+        expires_at INTEGER,
+        PRIMARY KEY (guild_id, user_id, command_type)
+      );
+    `);
+  }
 }
 
 function getDb() {
@@ -28,6 +49,7 @@ function getDb() {
       buy_cooldown INTEGER DEFAULT 5,
       bypass_roles TEXT DEFAULT '[]',
       mm_roles TEXT DEFAULT '[]',
+      staff_roles TEXT DEFAULT '[]',
       embed_color TEXT DEFAULT '#3498db'
     );
 
@@ -46,23 +68,34 @@ function getDb() {
       middleman TEXT NOT NULL,
       description TEXT,
       image_url TEXT,
+      boosted_until INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS cooldowns (
+      guild_id TEXT,
       user_id TEXT,
       command_type TEXT,
       expires_at INTEGER,
-      PRIMARY KEY (user_id, command_type)
+      PRIMARY KEY (guild_id, user_id, command_type)
     );
   `);
 
-  // Migration douce pour les bases existantes créées avant l'ajout de guild_id
-  try {
-    dbInstance.exec(`ALTER TABLE ads ADD COLUMN guild_id TEXT`);
-  } catch (err) {
-    // La colonne existe déjà : on ignore l'erreur "duplicate column name"
+  // Migrations douces pour les bases existantes créées avant ces ajouts
+  const softMigrations = [
+    `ALTER TABLE ads ADD COLUMN guild_id TEXT`,
+    `ALTER TABLE ads ADD COLUMN boosted_until INTEGER`,
+    `ALTER TABLE config ADD COLUMN staff_roles TEXT DEFAULT '[]'`
+  ];
+  for (const sql of softMigrations) {
+    try {
+      dbInstance.exec(sql);
+    } catch (err) {
+      // La colonne existe déjà : on ignore l'erreur "duplicate column name"
+    }
   }
+
+  ensureCooldownsSchema();
 
   return dbInstance;
 }
@@ -81,21 +114,23 @@ function getConfig(guildId) {
       buy_cooldown: 5,
       bypass_roles: [],
       mm_roles: [],
+      staff_roles: [],
       embed_color: '#3498db'
     };
   }
   return {
     ...row,
     bypass_roles: JSON.parse(row.bypass_roles),
-    mm_roles: JSON.parse(row.mm_roles)
+    mm_roles: JSON.parse(row.mm_roles),
+    staff_roles: JSON.parse(row.staff_roles || '[]')
   };
 }
 
 function saveConfig(guildId, config) {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO config (guild_id, sell_channel, buy_channel, sell_cooldown, buy_cooldown, bypass_roles, mm_roles, embed_color)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO config (guild_id, sell_channel, buy_channel, sell_cooldown, buy_cooldown, bypass_roles, mm_roles, staff_roles, embed_color)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(guild_id) DO UPDATE SET
       sell_channel = excluded.sell_channel,
       buy_channel = excluded.buy_channel,
@@ -103,6 +138,7 @@ function saveConfig(guildId, config) {
       buy_cooldown = excluded.buy_cooldown,
       bypass_roles = excluded.bypass_roles,
       mm_roles = excluded.mm_roles,
+      staff_roles = excluded.staff_roles,
       embed_color = excluded.embed_color
   `);
   stmt.run(
@@ -113,16 +149,18 @@ function saveConfig(guildId, config) {
     config.buy_cooldown,
     JSON.stringify(config.bypass_roles || []),
     JSON.stringify(config.mm_roles || []),
+    JSON.stringify(config.staff_roles || []),
     config.embed_color || '#3498db'
   );
 }
 
 // Ads functions
-function generateAdId(type) {
+// L'ID est désormais numéroté PAR SERVEUR (chaque serveur a son propre SELL-0001, SELL-0002...)
+function generateAdId(type, guildId) {
   const db = getDb();
   const prefix = type === 'SELL' ? 'SELL-' : 'BUY-';
-  const stmt = db.prepare('SELECT COUNT(*) as count FROM ads WHERE type = ?');
-  const count = stmt.get(type).count;
+  const stmt = db.prepare('SELECT COUNT(*) as count FROM ads WHERE type = ? AND guild_id = ?');
+  const count = stmt.get(type, guildId).count;
   const num = (count + 1).toString().padStart(4, '0');
   return prefix + num;
 }
@@ -163,57 +201,14 @@ function getAd(id) {
   return stmt.get(id);
 }
 
-// Récupère les offres les plus récentes d'un serveur, avec filtre type optionnel
+// Récupère les offres les plus récentes d'un serveur, boostées en premier
 function getRecentAds(guildId, type = 'ALL', limit = 10) {
   const db = getDb();
-  if (type === 'ALL') {
-    const stmt = db.prepare('SELECT * FROM ads WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?');
-    return stmt.all(guildId, limit);
-  }
-  const stmt = db.prepare('SELECT * FROM ads WHERE guild_id = ? AND type = ? ORDER BY created_at DESC LIMIT ?');
-  return stmt.all(guildId, type, limit);
-}
-
-// Cooldown functions
-function checkCooldown(userId, commandType, durationMinutes, memberRoles, bypassRoles) {
-  // Check bypass
-  if (memberRoles && bypassRoles) {
-    if (memberRoles.some(role => bypassRoles.includes(role))) {
-      return { onCooldown: false };
-    }
-  }
-
-  const db = getDb();
-  const stmt = db.prepare('SELECT expires_at FROM cooldowns WHERE user_id = ? AND command_type = ?');
-  const row = stmt.get(userId, commandType);
-
   const now = Date.now();
+  const fetchLimit = Math.max(limit * 5, 50);
 
-  if (row && row.expires_at > now) {
-    const remainingMs = row.expires_at - now;
-    return { onCooldown: true, remaining: remainingMs };
-  }
-
-  // Set new cooldown
-  const expiresAt = now + (durationMinutes * 60 * 1000);
-  const insertStmt = db.prepare(`
-    INSERT INTO cooldowns (user_id, command_type, expires_at)
-    VALUES (?, ?, ?)
-    ON CONFLICT(user_id, command_type) DO UPDATE SET expires_at = excluded.expires_at
-  `);
-  insertStmt.run(userId, commandType, expiresAt);
-
-  return { onCooldown: false };
-}
-
-module.exports = {
-  getDb,
-  getConfig,
-  saveConfig,
-  generateAdId,
-  createAd,
-  updateAdMessage,
-  getAd,
-  getRecentAds,
-  checkCooldown
-};
+  let rows;
+  if (type === 'ALL') {
+    rows = db.prepare('SELECT * FROM ads WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?').all(guildId, fetchLimit);
+  } else {
+    rows = db.prepare('SELECT * FROM ads WHERE guild_id = ? AND type = ? ORDER BY created_at DESC LIMIT ?').all(guildId,
