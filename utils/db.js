@@ -16,7 +16,7 @@ function ensureDataDir() {
 }
 
 function ensureCooldownsSchema() {
-  const cols = dbInstance.prepare("PRAGMA table_info(cooldowns)").all();
+  const cols = dbInstance.prepare('PRAGMA table_info(cooldowns)').all();
   const hasGuildId = cols.some(c => c.name === 'guild_id');
   if (!hasGuildId) {
     // Les cooldowns sont des données transitoires (non critiques) :
@@ -79,6 +79,12 @@ function getDb() {
       expires_at INTEGER,
       PRIMARY KEY (guild_id, user_id, command_type)
     );
+
+    CREATE TABLE IF NOT EXISTS json_store (
+      file_name TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // Migrations douces pour les bases existantes créées avant ces ajouts
@@ -90,7 +96,7 @@ function getDb() {
   for (const sql of softMigrations) {
     try {
       dbInstance.exec(sql);
-    } catch (err) {
+    } catch {
       // La colonne existe déjà : on ignore l'erreur "duplicate column name"
     }
   }
@@ -98,6 +104,23 @@ function getDb() {
   ensureCooldownsSchema();
 
   return dbInstance;
+}
+
+function safeJsonParse(raw, fallback) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function cloneDefault(defaultValue) {
+  if (defaultValue === null || typeof defaultValue !== 'object') return defaultValue;
+  try {
+    return JSON.parse(JSON.stringify(defaultValue));
+  } catch {
+    return defaultValue;
+  }
 }
 
 // Config functions
@@ -120,9 +143,9 @@ function getConfig(guildId) {
   }
   return {
     ...row,
-    bypass_roles: JSON.parse(row.bypass_roles),
-    mm_roles: JSON.parse(row.mm_roles),
-    staff_roles: JSON.parse(row.staff_roles || '[]')
+    bypass_roles: safeJsonParse(row.bypass_roles, []),
+    mm_roles: safeJsonParse(row.mm_roles, []),
+    staff_roles: safeJsonParse(row.staff_roles || '[]', [])
   };
 }
 
@@ -201,14 +224,124 @@ function getAd(id) {
   return stmt.get(id);
 }
 
+function isAdBoosted(ad) {
+  return Boolean(ad && ad.boosted_until && ad.boosted_until > Date.now());
+}
+
+function setAdBoost(adId) {
+  const db = getDb();
+  const now = Date.now();
+  const expiresAt = now + BOOST_DURATION_HOURS * 60 * 60 * 1000;
+  const stmt = db.prepare('UPDATE ads SET boosted_until = ? WHERE id = ?');
+  stmt.run(expiresAt, adId);
+  return { expiresAt };
+}
+
 // Récupère les offres les plus récentes d'un serveur, boostées en premier
 function getRecentAds(guildId, type = 'ALL', limit = 10) {
   const db = getDb();
-  const now = Date.now();
   const fetchLimit = Math.max(limit * 5, 50);
 
   let rows;
   if (type === 'ALL') {
     rows = db.prepare('SELECT * FROM ads WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?').all(guildId, fetchLimit);
   } else {
-    rows = db.prepare('SELECT * FROM ads WHERE guild_id = ? AND type = ? ORDER BY created_at DESC LIMIT ?').all(guildId,
+    rows = db.prepare('SELECT * FROM ads WHERE guild_id = ? AND type = ? ORDER BY created_at DESC LIMIT ?').all(guildId, type, fetchLimit);
+  }
+
+  const sorted = rows.sort((a, b) => {
+    const aBoosted = isAdBoosted(a) ? 1 : 0;
+    const bBoosted = isAdBoosted(b) ? 1 : 0;
+    if (aBoosted !== bBoosted) return bBoosted - aBoosted;
+
+    const aTime = new Date(a.created_at).getTime() || 0;
+    const bTime = new Date(b.created_at).getTime() || 0;
+    return bTime - aTime;
+  });
+
+  return sorted.slice(0, limit);
+}
+
+function checkCooldown(guildId, userId, commandType, cooldownMinutes = 5, memberRoles = [], bypassRoles = []) {
+  if (Array.isArray(memberRoles) && Array.isArray(bypassRoles)) {
+    const bypass = memberRoles.some(roleId => bypassRoles.includes(roleId));
+    if (bypass) {
+      return { onCooldown: false, remaining: 0 };
+    }
+  }
+
+  const minutes = Number(cooldownMinutes);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return { onCooldown: false, remaining: 0 };
+  }
+
+  const db = getDb();
+  const now = Date.now();
+  const stmt = db.prepare('SELECT expires_at FROM cooldowns WHERE guild_id = ? AND user_id = ? AND command_type = ?');
+  const existing = stmt.get(guildId, userId, commandType);
+
+  if (existing && existing.expires_at > now) {
+    return { onCooldown: true, remaining: existing.expires_at - now };
+  }
+
+  const expiresAt = now + minutes * 60 * 1000;
+  db.prepare(`
+    INSERT INTO cooldowns (guild_id, user_id, command_type, expires_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(guild_id, user_id, command_type) DO UPDATE SET
+      expires_at = excluded.expires_at
+  `).run(guildId, userId, commandType, expiresAt);
+
+  return { onCooldown: false, remaining: 0, expiresAt };
+}
+
+// JSON storage compatibility layer
+function readData(fileName, defaultValue = {}) {
+  const db = getDb();
+  const row = db.prepare('SELECT payload FROM json_store WHERE file_name = ?').get(fileName);
+  if (row) {
+    return safeJsonParse(row.payload, cloneDefault(defaultValue));
+  }
+
+  // Migration automatique d'un ancien fichier JSON local si présent
+  const legacyPath = path.join(DATA_DIR, fileName);
+  if (fs.existsSync(legacyPath)) {
+    try {
+      const legacyData = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+      writeData(fileName, legacyData);
+      return legacyData;
+    } catch {
+      return cloneDefault(defaultValue);
+    }
+  }
+
+  return cloneDefault(defaultValue);
+}
+
+function writeData(fileName, data) {
+  const db = getDb();
+  const payload = JSON.stringify(data ?? {});
+  db.prepare(`
+    INSERT INTO json_store (file_name, payload, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(file_name) DO UPDATE SET
+      payload = excluded.payload,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(fileName, payload);
+}
+
+module.exports = {
+  getDb,
+  getConfig,
+  saveConfig,
+  generateAdId,
+  createAd,
+  updateAdMessage,
+  getAd,
+  getRecentAds,
+  isAdBoosted,
+  setAdBoost,
+  checkCooldown,
+  readData,
+  writeData,
+};
